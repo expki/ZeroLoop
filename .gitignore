@@ -1,0 +1,6 @@
+*.db
+*.search/
+*.md
+!README.md
+!CLAUDE.md
+zeroloop
