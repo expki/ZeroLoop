@@ -58,7 +58,7 @@ func Load() *Config {
 
 	cfg = &Config{
 		// Server
-		Port:        must(getEnv("PORT", 80)),
+		Port:        must(getEnv("PORT", 9368)),
 		Environment: must(getEnv("ENVIRONMENT", "development")),
 		LogLevel:    must(getEnv("LOG_LEVEL", "")), // Empty means auto (debug for dev, info for prod)
 

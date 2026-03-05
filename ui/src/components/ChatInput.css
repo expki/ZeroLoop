@@ -1,0 +1,110 @@
+.chat-input-section {
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-elevated);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.chat-input-container {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--spacing-sm);
+  max-width: var(--chat-max-width);
+  margin: 0 auto;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  transition: border-color var(--transition-fast);
+}
+
+.chat-input-container:focus-within {
+  border-color: var(--color-primary);
+}
+
+.input-action-btn {
+  flex-shrink: 0;
+}
+
+.chat-textarea {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  padding: var(--spacing-sm) 0;
+  resize: none;
+  outline: none;
+  max-height: 200px;
+}
+
+.chat-textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-border);
+  color: var(--color-text-tertiary);
+  cursor: not-allowed;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.send-btn.active {
+  background: var(--color-primary);
+  color: white;
+  cursor: pointer;
+}
+
+.send-btn.active:hover {
+  background: var(--color-primary-hover);
+}
+
+.send-btn .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.input-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+  max-width: var(--chat-max-width);
+  margin: var(--spacing-xs) auto 0;
+  padding: 0 var(--spacing-xs);
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xxs) var(--spacing-sm);
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.action-btn:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
+.action-btn .material-symbols-outlined {
+  font-size: 16px;
+}
+
+@media (max-width: 640px) {
+  .action-label {
+    display: none;
+  }
+}

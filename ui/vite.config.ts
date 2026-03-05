@@ -5,15 +5,16 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: '../dist',
-    emptyOutDir: true,
+    emptyOutDir: false,
   },
   server: {
-    port: 5173,
+    host: '0.0.0.0',
+    port: 9369,
     proxy: {
-      '/api': { target: 'http://localhost:3080', changeOrigin: true },
-      '/ws': { target: 'ws://localhost:3080', ws: true },
-      '/health': { target: 'http://localhost:3080' },
-      '/graphql': { target: 'http://localhost:3080' },
+      '/api': { target: 'http://localhost:9368', changeOrigin: true },
+      '/ws': { target: 'ws://localhost:9368', ws: true },
+      '/health': { target: 'http://localhost:9368' },
+      '/graphql': { target: 'http://localhost:9368' },
     },
   },
 })

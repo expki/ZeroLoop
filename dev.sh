@@ -9,7 +9,7 @@ tmux kill-session -t "$SESSION" 2>/dev/null || true
 
 # Create session with backend window
 tmux new-session -d -s "$SESSION" -n backend -c "$DIR"
-tmux send-keys -t "$SESSION:backend" "ENVIRONMENT=development PORT=3080 go run ." Enter
+tmux send-keys -t "$SESSION:backend" "ENVIRONMENT=development PORT=9368 go run ." Enter
 
 # Create frontend window
 tmux new-window -t "$SESSION" -n frontend -c "$DIR/ui"
