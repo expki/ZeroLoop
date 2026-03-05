@@ -27,6 +27,12 @@ type Config struct {
 	// Search
 	SearchDir string
 
+	// LLM
+	LLMBaseURL string
+
+	// SearXNG (web search)
+	SearXNGURL string
+
 	// JWT
 	JWTSecret        string
 	JWTAccessExpiry  int // seconds
@@ -47,6 +53,9 @@ type Config struct {
 	// TLS
 	TLSCert string
 	TLSKey  string
+
+	// Projects
+	ProjectsDir string
 }
 
 var cfg *Config
@@ -65,13 +74,19 @@ func Load() *Config {
 		// Database
 		DBDriver: must(getEnv("DB_DRIVER", "sqlite")),
 		DatabaseURL: must(getEnv("DATABASE_URL", func() string {
-			return filepath.Join(getBaseFolder(), "agentzero.db")
+			return filepath.Join(getBaseFolder(), "zeroloop.db")
 		}())),
 
 		// Search
 		SearchDir: must(getEnv("SEARCH_DIR", func() string {
-			return filepath.Join(getBaseFolder(), "agentzero.search/")
+			return filepath.Join(getBaseFolder(), "zeroloop.search/")
 		}())),
+
+		// LLM
+		LLMBaseURL: must(getEnv("LLM_BASE_URL", "http://192.168.10.15:8081")),
+
+		// SearXNG
+		SearXNGURL: must(getEnv("SEARXNG_URL", "")),
 
 		// JWT
 		JWTSecret: must(getEnv("JWT_SECRET", func() string {
@@ -105,6 +120,11 @@ func Load() *Config {
 		// TLS
 		TLSCert: must(getEnv("TLS_CERT", "")),
 		TLSKey:  must(getEnv("TLS_KEY", "")),
+
+		// Projects
+		ProjectsDir: must(getEnv("PROJECTS_DIR", func() string {
+			return filepath.Join(getBaseFolder(), "projects")
+		}())),
 	}
 
 	return cfg

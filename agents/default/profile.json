@@ -1,0 +1,6 @@
+{
+  "name": "default",
+  "description": "Default agent profile",
+  "role": "You are a helpful, capable AI assistant that solves problems autonomously.",
+  "role_type": "Primary agent (interact directly with user)"
+}

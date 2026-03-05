@@ -12,7 +12,7 @@ import (
 func createRobotsTxtHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var builder strings.Builder
-		builder.WriteString("# Agent Zero")
+		builder.WriteString("# ZeroLoop")
 		builder.WriteString("\n## A minimal agent loop that traps LLMs in a cycle of thinking, executing, observing, and repeating.\n")
 
 		// User-agent
@@ -42,7 +42,7 @@ func createRobotsTxtHandler() http.HandlerFunc {
 func createLlmsTxtHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var builder strings.Builder
-		builder.WriteString("# Agent Zero\n")
+		builder.WriteString("# ZeroLoop\n")
 		builder.WriteString("\n> A minimal agent loop that traps LLMs in a cycle of thinking, executing, observing, and repeating.\n")
 
 		// TODO: add sections

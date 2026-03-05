@@ -1,23 +1,16 @@
 import { useChatStore } from '../stores/chatStore'
+import { useProjectStore } from '../stores/projectStore'
 import { useUIStore } from '../stores/uiStore'
 import './WelcomeScreen.css'
 
-const actions = [
-  { icon: 'add_comment', title: 'New Chat', description: 'Start a new conversation' },
-  { icon: 'folder', title: 'Projects', description: 'Manage your projects' },
-  { icon: 'psychology', title: 'Memory', description: 'View agent memory' },
-  { icon: 'schedule', title: 'Scheduler', description: 'Schedule automated tasks' },
-  { icon: 'settings', title: 'Settings', description: 'Configure agent behavior' },
-  { icon: 'description', title: 'Files', description: 'Browse workspace files' },
-]
-
 function WelcomeScreen() {
   const createChat = useChatStore((s) => s.createChat)
-  const { sidebarOpen, toggleSidebar } = useUIStore()
+  const selectedProjectId = useProjectStore((s) => s.selectedProjectId)
+  const { sidebarOpen, toggleSidebar, setSidebarOpen } = useUIStore()
 
-  const handleAction = (title: string) => {
-    if (title === 'New Chat') {
-      createChat()
+  const handleNewChat = () => {
+    if (selectedProjectId) {
+      createChat(selectedProjectId)
     }
   }
 
@@ -32,20 +25,19 @@ function WelcomeScreen() {
         <div className="welcome-hero">
           <span className="welcome-logo material-symbols-outlined">hub</span>
           <h1 className="welcome-title">ZeroLoop</h1>
-          <p className="welcome-subtitle">AI Agent Framework</p>
+          <p className="welcome-subtitle">Start a chat to begin working on your project</p>
         </div>
         <div className="action-grid">
-          {actions.map((action) => (
-            <button
-              key={action.title}
-              className="action-card"
-              onClick={() => handleAction(action.title)}
-            >
-              <span className="material-symbols-outlined action-icon">{action.icon}</span>
-              <span className="action-title">{action.title}</span>
-              <span className="action-desc">{action.description}</span>
-            </button>
-          ))}
+          <button className="action-card" onClick={handleNewChat}>
+            <span className="material-symbols-outlined action-icon">add_comment</span>
+            <span className="action-title">New Chat</span>
+            <span className="action-desc">Start a new conversation</span>
+          </button>
+          <button className="action-card" onClick={() => setSidebarOpen(true)}>
+            <span className="material-symbols-outlined action-icon">settings</span>
+            <span className="action-title">Preferences</span>
+            <span className="action-desc">Configure display settings</span>
+          </button>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import type { Message, DetailMode } from '../types'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -14,22 +14,60 @@ const BADGE_MAP: Record<string, { code: string; color: string }> = {
   response: { code: 'RES', color: 'var(--color-accent-teal)' },
 }
 
-function getBadge(type: string, kvps?: Record<string, string>) {
-  if (type === 'tool' && kvps?.tool_name) {
+function getKvps(kvps?: Record<string, string> | string): Record<string, string> | undefined {
+  if (!kvps || typeof kvps === 'string') return undefined
+  return kvps
+}
+
+function getBadge(type: string, kvps?: Record<string, string> | string) {
+  const parsed = getKvps(kvps)
+  if (type === 'tool' && parsed?.tool_name) {
     const toolBadges: Record<string, { code: string; color: string }> = {
       code_execution: { code: 'EXE', color: 'var(--color-accent-purple)' },
       web_search: { code: 'WEB', color: 'var(--color-accent-indigo)' },
       memory: { code: 'MEM', color: 'var(--color-accent-teal)' },
       mcp: { code: 'MCP', color: 'var(--color-accent-amber)' },
+      response: { code: 'RES', color: 'var(--color-accent-teal)' },
+      call_subordinate: { code: 'SUB', color: 'var(--color-accent-rose)' },
+      knowledge: { code: 'KNW', color: 'var(--color-accent-teal)' },
     }
-    return toolBadges[kvps.tool_name] || BADGE_MAP.tool
+    return toolBadges[parsed.tool_name] || BADGE_MAP.tool
   }
   return BADGE_MAP[type] || { code: '???', color: 'var(--color-text-tertiary)' }
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [text])
+
+  return (
+    <button className="icon-button action-small" title={copied ? 'Copied!' : 'Copy'} onClick={handleCopy}>
+      <span className="material-symbols-outlined">{copied ? 'check' : 'content_copy'}</span>
+    </button>
+  )
 }
 
 function ProcessStep({ step, expanded }: { step: Message; expanded: boolean }) {
   const [isOpen, setIsOpen] = useState(expanded)
   const badge = getBadge(step.type, step.kvps)
+  const kvps = getKvps(step.kvps)
 
   return (
     <div className="process-step">
@@ -47,10 +85,10 @@ function ProcessStep({ step, expanded }: { step: Message; expanded: boolean }) {
       </div>
       {isOpen && (
         <div className="step-detail">
-          {step.kvps && Object.keys(step.kvps).length > 0 && (
+          {kvps && Object.keys(kvps).length > 0 && (
             <table className="step-kvps">
               <tbody>
-                {Object.entries(step.kvps).map(([key, value]) => (
+                {Object.entries(kvps).map(([key, value]) => (
                   <tr key={key}>
                     <td className="kvp-key">{key}</td>
                     <td className="kvp-value">{value}</td>
@@ -128,9 +166,7 @@ function ProcessGroup({ steps, response, detailMode }: ProcessGroupProps) {
             <div className="group-response markdown-body">
               <Markdown remarkPlugins={[remarkGfm]}>{response.content}</Markdown>
               <div className="message-actions">
-                <button className="icon-button action-small" title="Copy">
-                  <span className="material-symbols-outlined">content_copy</span>
-                </button>
+                <CopyButton text={response.content} />
               </div>
             </div>
           )}

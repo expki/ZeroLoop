@@ -1,6 +1,8 @@
-*.db
+*.db*
 *.search/
 *.md
 !README.md
 !CLAUDE.md
-zeroloop
+.sisyphus/
+.omc/
+zeroloop*

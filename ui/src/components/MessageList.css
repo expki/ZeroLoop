@@ -24,6 +24,15 @@
   min-height: 200px;
 }
 
+.message-list-empty .spinning {
+  animation: msg-spin 1s linear infinite;
+}
+
+@keyframes msg-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* User Message */
 .user-message {
   align-self: flex-end;

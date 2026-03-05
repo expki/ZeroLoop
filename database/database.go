@@ -56,7 +56,9 @@ func Connect() error {
 		})
 	case "sqlite", "sqlite3":
 		logger.Log.Infow("connecting to SQLite database", "path", cfg.DatabaseURL)
-		db, err = gorm.Open(sqlite.Open(cfg.DatabaseURL), &gorm.Config{
+		// Enable foreign keys and WAL mode for SQLite
+		dsn := cfg.DatabaseURL + "?_foreign_keys=on&_journal_mode=WAL"
+		db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
 			Logger: gormLogger,
 		})
 	default:
@@ -89,7 +91,10 @@ func AutoMigrate() error {
 	logger.Log.Info("running database migrations")
 
 	err := DB.AutoMigrate(
-		&models.Example{},
+		&models.Project{},
+		&models.ProjectFile{},
+		&models.Chat{},
+		&models.Message{},
 	)
 	if err != nil {
 		return err

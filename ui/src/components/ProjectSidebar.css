@@ -1,0 +1,85 @@
+/* Project name bar */
+.project-name-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-subtle);
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.project-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sidebar sections */
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--color-border-subtle);
+  max-height: 35vh;
+  overflow: hidden;
+}
+
+.sidebar-section-grow {
+  flex: 1;
+  max-height: none;
+  border-bottom: none;
+}
+
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-xs) var(--spacing-md);
+}
+
+.sidebar-section-title {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.sidebar-section-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.sidebar-section-actions .icon-button {
+  padding: 2px;
+}
+
+/* New file row */
+.new-file-row {
+  padding: 0 var(--spacing-md) var(--spacing-xs);
+}
+
+.new-file-input {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  font-family: monospace;
+  outline: none;
+}
+
+/* Override file tree overflow in section */
+.sidebar-section .file-tree {
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Override chat list in section */
+.sidebar-section-grow .chat-list {
+  flex: 1;
+  overflow-y: auto;
+}

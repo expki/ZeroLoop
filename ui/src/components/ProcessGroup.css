@@ -173,6 +173,21 @@
   background: #0d1117;
   border-radius: var(--radius-sm);
   padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid #21262d;
+  position: relative;
+}
+
+.step-content.terminal::before {
+  content: 'terminal';
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #484f58;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: var(--spacing-xs);
+  padding-bottom: var(--spacing-xs);
+  border-bottom: 1px solid #21262d;
 }
 
 .step-content.terminal pre {

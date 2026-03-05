@@ -1,8 +1,67 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useChatStore } from '../stores/chatStore'
 import { useUIStore } from '../stores/uiStore'
 import type { ChatWidth, DetailMode } from '../types'
 import './Sidebar.css'
+
+function EditableChatName({ chatId, name, isActive }: { chatId: string; name: string; isActive: boolean }) {
+  const [editing, setEditing] = useState(false)
+  const [editValue, setEditValue] = useState(name)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const renameChat = useChatStore((s) => s.renameChat)
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [editing])
+
+  // Sync name prop changes
+  useEffect(() => {
+    if (!editing) setEditValue(name)
+  }, [name, editing])
+
+  const handleSave = () => {
+    const trimmed = editValue.trim()
+    if (trimmed && trimmed !== name) {
+      renameChat(chatId, trimmed)
+    } else {
+      setEditValue(name)
+    }
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="chat-name-input"
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSave()
+          if (e.key === 'Escape') { setEditValue(name); setEditing(false) }
+        }}
+        onClick={(e) => e.stopPropagation()}
+      />
+    )
+  }
+
+  return (
+    <span
+      className="chat-name"
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        if (isActive) setEditing(true)
+      }}
+      title="Double-click to rename"
+    >
+      {name}
+    </span>
+  )
+}
 
 function Sidebar() {
   const { chats, selectedChatId, selectChat, createChat, deleteChat } = useChatStore()
@@ -45,7 +104,7 @@ function Sidebar() {
         </button>
       </div>
 
-      <button className="new-chat-btn" onClick={createChat}>
+      <button className="new-chat-btn" onClick={() => createChat('')}>
         <span className="material-symbols-outlined">add</span>
         New Chat
       </button>
@@ -61,7 +120,7 @@ function Sidebar() {
               onClick={() => handleSelectChat(chat.id)}
             >
               <div className={`chat-status-dot ${chat.running ? 'running' : ''}`} />
-              <span className="chat-name">{chat.name}</span>
+              <EditableChatName chatId={chat.id} name={chat.name} isActive={selectedChatId === chat.id} />
               <button
                 className="chat-close icon-button"
                 onClick={(e) => {

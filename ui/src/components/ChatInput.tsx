@@ -9,6 +9,7 @@ function ChatInput() {
   const paused = useChatStore((s) => s.paused)
   const togglePause = useChatStore((s) => s.togglePause)
   const clearChat = useChatStore((s) => s.clearChat)
+  const exportChat = useChatStore((s) => s.exportChat)
 
   const handleSend = useCallback(() => {
     if (!input.trim()) return
@@ -36,9 +37,6 @@ function ChatInput() {
   return (
     <div className="chat-input-section">
       <div className="chat-input-container">
-        <button className="icon-button input-action-btn" title="Attach file">
-          <span className="material-symbols-outlined">attach_file</span>
-        </button>
         <textarea
           ref={textareaRef}
           className="chat-textarea"
@@ -68,17 +66,9 @@ function ChatInput() {
           <span className="material-symbols-outlined">delete_sweep</span>
           <span className="action-label">Clear</span>
         </button>
-        <button className="action-btn">
-          <span className="material-symbols-outlined">save</span>
-          <span className="action-label">Save</span>
-        </button>
-        <button className="action-btn">
-          <span className="material-symbols-outlined">folder_open</span>
-          <span className="action-label">Files</span>
-        </button>
-        <button className="action-btn">
-          <span className="material-symbols-outlined">history</span>
-          <span className="action-label">History</span>
+        <button className="action-btn" onClick={exportChat}>
+          <span className="material-symbols-outlined">download</span>
+          <span className="action-label">Export</span>
         </button>
       </div>
     </div>

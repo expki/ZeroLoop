@@ -12,6 +12,17 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
+  min-width: 0;
+}
+
+.topbar-chat-name {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
 }
 
 .topbar-time {

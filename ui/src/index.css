@@ -85,6 +85,7 @@
   --color-accent-orange: #f97316;
   --color-accent-slate: #94a3b8;
   --color-accent-pink: #f472b6;
+  --color-accent-rose: #fb7185;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
@@ -130,6 +131,7 @@
   --color-accent-orange: #ea580c;
   --color-accent-slate: #64748b;
   --color-accent-pink: #ec4899;
+  --color-accent-rose: #e11d48;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -218,4 +220,10 @@ a:hover {
 ::selection {
   background: var(--color-primary-muted);
   color: var(--color-text);
+}
+
+/* Shared Animations */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }

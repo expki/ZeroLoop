@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo } from 'react'
+import { useRef, useEffect, useMemo, useState } from 'react'
 import { useChatStore } from '../stores/chatStore'
 import { useUIStore } from '../stores/uiStore'
 import ProcessGroup from './ProcessGroup'
@@ -56,6 +56,36 @@ function UserMessage({ message }: { message: Message }) {
   )
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Fallback for non-secure contexts
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  return (
+    <button className="icon-button action-small" title={copied ? 'Copied!' : 'Copy'} onClick={handleCopy}>
+      <span className="material-symbols-outlined">{copied ? 'check' : 'content_copy'}</span>
+    </button>
+  )
+}
+
 function AgentResponse({ message }: { message: Message }) {
   return (
     <div className="message agent-response">
@@ -63,9 +93,7 @@ function AgentResponse({ message }: { message: Message }) {
         <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
       </div>
       <div className="message-actions">
-        <button className="icon-button action-small" title="Copy">
-          <span className="material-symbols-outlined">content_copy</span>
-        </button>
+        <CopyButton text={message.content} />
       </div>
     </div>
   )
@@ -95,6 +123,7 @@ function StandaloneMessage({ message }: { message: Message }) {
 
 function MessageList() {
   const messages = useChatStore((s) => s.messages)
+  const loading = useChatStore((s) => s.loading)
   const chatWidth = useUIStore((s) => s.chatWidth)
   const detailMode = useUIStore((s) => s.detailMode)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -108,6 +137,19 @@ function MessageList() {
   }, [messages])
 
   const maxWidth = chatWidth === 'full' ? '100%' : chatWidth
+
+  if (loading) {
+    return (
+      <div className="message-list">
+        <div className="message-list-inner" style={{ maxWidth }}>
+          <div className="message-list-empty">
+            <span className="material-symbols-outlined spinning" style={{ fontSize: 32, opacity: 0.4 }}>progress_activity</span>
+            <p>Loading messages...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="message-list" ref={scrollRef}>

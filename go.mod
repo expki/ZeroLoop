@@ -6,6 +6,8 @@ require (
 	github.com/andybalholm/brotli v1.2.0
 	github.com/blevesearch/bleve/v2 v2.5.7
 	github.com/denisbrodbeck/machineid v1.0.1
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.18.3
 	github.com/spf13/afero v1.15.0

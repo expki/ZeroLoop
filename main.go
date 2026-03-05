@@ -7,17 +7,21 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
 
+	"github.com/expki/ZeroLoop.git/api"
 	"github.com/expki/ZeroLoop.git/config"
 	"github.com/expki/ZeroLoop.git/database"
+	"github.com/expki/ZeroLoop.git/filemanager"
+	"github.com/expki/ZeroLoop.git/llm"
 	"github.com/expki/ZeroLoop.git/logger"
 	"github.com/expki/ZeroLoop.git/middleware"
-	_ "github.com/expki/ZeroLoop.git/search"
+	"github.com/expki/ZeroLoop.git/search"
 )
 
 func main() {
@@ -44,11 +48,38 @@ func main() {
 		logger.Log.Fatalw("failed to run migrations", "error", err)
 	}
 
+	// Ensure projects directory exists
+	if err := os.MkdirAll(cfg.ProjectsDir, 0755); err != nil {
+		logger.Log.Fatalw("failed to create projects directory", "error", err, "path", cfg.ProjectsDir)
+	}
+	logger.Log.Infow("projects directory ready", "path", cfg.ProjectsDir)
+
+	// Initialize search index
+	if err := search.Init(); err != nil {
+		logger.Log.Fatalw("failed to initialize search index", "error", err)
+	}
+	defer search.Close()
+
+	// Initialize file manager
+	fm := filemanager.New(cfg.ProjectsDir)
+	logger.Log.Infow("file manager initialized", "projects_dir", cfg.ProjectsDir)
+
+	// Initialize LLM client
+	llmClient := llm.NewClient(cfg.LLMBaseURL)
+	logger.Log.Infow("LLM client initialized", "url", cfg.LLMBaseURL)
+
+	// Initialize WebSocket hub
+	hub := api.NewHub(llmClient, fm)
+	go hub.Run()
+
 	// Create mux and register routes
 	mux := http.NewServeMux()
 
-	// Stripe webhook endpoint (no auth)
-	// TODO: "/api/stripe/webhook"
+	// API routes
+	api.RegisterRoutes(mux, hub, fm)
+
+	// WebSocket endpoint
+	mux.HandleFunc("/ws", hub.HandleWebSocket)
 
 	// Health check
 	mux.HandleFunc("/health", healthHandler)
@@ -156,12 +187,12 @@ func main() {
 			},
 		}
 
-		logger.Log.Infow("graphql endpoint", "url", "https://localhost:"+strconv.Itoa(cfg.Port))
+		logger.Log.Infow("server started", "url", "https://localhost:"+strconv.Itoa(cfg.Port))
 		if err := server.ListenAndServeTLS("", ""); err != nil {
 			logger.Log.Fatalw("server failed", "error", err)
 		}
 	} else {
-		logger.Log.Infow("graphql endpoint", "url", "http://localhost:"+strconv.Itoa(cfg.Port))
+		logger.Log.Infow("server started", "url", "http://localhost:"+strconv.Itoa(cfg.Port))
 		if err := http.ListenAndServe(serverAddr, handler); err != nil {
 			logger.Log.Fatalw("server failed", "error", err)
 		}
