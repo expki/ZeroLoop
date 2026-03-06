@@ -52,12 +52,11 @@ export interface ProjectFile {
   mime_type: string
 }
 
-export interface FileTreeNode {
+export interface ArboristNode {
+  id: string
   name: string
-  path: string
   isDir: boolean
-  size: number
-  children?: FileTreeNode[]
+  children?: ArboristNode[]
 }
 
 export type MainView =

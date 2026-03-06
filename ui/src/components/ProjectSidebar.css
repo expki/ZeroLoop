@@ -55,25 +55,8 @@
   padding: 2px;
 }
 
-/* New file row */
-.new-file-row {
-  padding: 0 var(--spacing-md) var(--spacing-xs);
-}
-
-.new-file-input {
-  width: 100%;
-  padding: 4px 8px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-  font-size: var(--font-size-xs);
-  font-family: monospace;
-  outline: none;
-}
-
 /* Override file tree overflow in section */
-.sidebar-section .file-tree {
+.sidebar-section .arb-tree-container {
   overflow-y: auto;
   flex: 1;
 }

@@ -1,25 +1,20 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useProjectStore } from '../stores/projectStore'
 import { useChatStore } from '../stores/chatStore'
 import { useUIStore } from '../stores/uiStore'
-import { api } from '../services/api'
-import FileTree from './FileTree'
+import ArboristFileTree from './ArboristFileTree'
 import type { ChatWidth, DetailMode } from '../types'
 import './Sidebar.css'
 import './ProjectSidebar.css'
 
 function ProjectSidebar() {
-  const { selectedProjectId, selectProject, projects, getFileTree, openFile, mainView, loadFiles } = useProjectStore()
+  const { selectedProjectId, selectProject, projects, loadFiles } = useProjectStore()
   const { chats, selectedChatId, selectChat, createChat, deleteChat, loadChatsForProject } = useChatStore()
   const {
     sidebarOpen, toggleSidebar, theme, toggleTheme,
     chatWidth, setChatWidth, detailMode, setDetailMode, setSidebarOpen,
   } = useUIStore()
   const [prefsOpen, setPrefsOpen] = useState(false)
-  const [showNewFile, setShowNewFile] = useState(false)
-  const [newFileName, setNewFileName] = useState('')
-  const newFileRef = useRef<HTMLInputElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const project = projects.find((p) => p.id === selectedProjectId)
 
@@ -30,36 +25,6 @@ function ProjectSidebar() {
       loadFiles(selectedProjectId)
     }
   }, [selectedProjectId, loadChatsForProject, loadFiles])
-
-  useEffect(() => {
-    if (showNewFile && newFileRef.current) {
-      newFileRef.current.focus()
-    }
-  }, [showNewFile])
-
-  const handleCreateFile = async () => {
-    const name = newFileName.trim()
-    if (!name || !selectedProjectId) return
-    try {
-      await api.createProjectFile(selectedProjectId, name, '')
-      setNewFileName('')
-      setShowNewFile(false)
-      loadFiles(selectedProjectId)
-    } catch (err) {
-      console.error('Failed to create file:', err)
-    }
-  }
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || !selectedProjectId) return
-    try {
-      await api.uploadProjectFiles(selectedProjectId, e.target.files)
-      loadFiles(selectedProjectId)
-    } catch (err) {
-      console.error('Failed to upload files:', err)
-    }
-    e.target.value = ''
-  }
 
   const handleSelectChat = (id: string) => {
     selectChat(id)
@@ -75,8 +40,6 @@ function ProjectSidebar() {
       useProjectStore.getState().setMainView({ type: 'chat' })
     }
   }
-
-  const editorPath = mainView.type === 'editor' ? mainView.filePath : undefined
 
   const widthOptions: { label: string; value: ChatWidth }[] = [
     { label: 'S', value: '40em' },
@@ -115,39 +78,8 @@ function ProjectSidebar() {
       <div className="sidebar-section">
         <div className="sidebar-section-header">
           <span className="sidebar-section-title">Files</span>
-          <div className="sidebar-section-actions">
-            <button className="icon-button" onClick={() => setShowNewFile(true)} title="New file">
-              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
-            </button>
-            <button className="icon-button" onClick={() => fileInputRef.current?.click()} title="Upload files">
-              <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>upload</span>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleUpload}
-            />
-          </div>
         </div>
-        {showNewFile && (
-          <div className="new-file-row">
-            <input
-              ref={newFileRef}
-              className="new-file-input"
-              placeholder="filename.ext"
-              value={newFileName}
-              onChange={(e) => setNewFileName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreateFile()
-                if (e.key === 'Escape') setShowNewFile(false)
-              }}
-              onBlur={() => { if (!newFileName.trim()) setShowNewFile(false) }}
-            />
-          </div>
-        )}
-        <FileTree nodes={getFileTree()} onSelect={openFile} selectedPath={editorPath} />
+        {selectedProjectId && <ArboristFileTree projectId={selectedProjectId} />}
       </div>
 
       {/* Chats section */}

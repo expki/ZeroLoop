@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Project, ProjectFile, FileTreeNode, MainView } from '../types'
+import type { Project, ProjectFile, ArboristNode, MainView } from '../types'
 import { api } from '../services/api'
 import { ws } from '../services/websocket'
 
@@ -19,14 +19,13 @@ interface ProjectState {
   loadFiles: (projectId: string) => Promise<void>
   setMainView: (view: MainView) => void
   openFile: (path: string) => void
-  getFileTree: () => FileTreeNode[]
+  getArboristTree: () => ArboristNode[]
 }
 
-function buildFileTree(files: ProjectFile[]): FileTreeNode[] {
-  const root: FileTreeNode[] = []
-  const dirMap = new Map<string, FileTreeNode>()
+function buildArboristTree(files: ProjectFile[]): ArboristNode[] {
+  const root: ArboristNode[] = []
+  const dirMap = new Map<string, ArboristNode>()
 
-  // Sort files so directories come first, then alphabetically
   const sorted = [...files].sort((a, b) => {
     if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
     return a.path.localeCompare(b.path)
@@ -34,11 +33,10 @@ function buildFileTree(files: ProjectFile[]): FileTreeNode[] {
 
   for (const file of sorted) {
     const parts = file.path.split('/')
-    const node: FileTreeNode = {
+    const node: ArboristNode = {
+      id: file.path,
       name: file.name,
-      path: file.path,
       isDir: file.is_dir,
-      size: file.size,
       children: file.is_dir ? [] : undefined,
     }
 
@@ -74,14 +72,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().loadProjects()
 
     // Listen for file events from WebSocket
-    ws.on('file_event', (payload: { project_id: string; path: string; name: string; size: number; action: string }) => {
+    ws.on('file_event', (payload: { project_id: string; path: string; name: string; size: number; action: string; old_path?: string }) => {
       const state = get()
       if (payload.project_id !== state.selectedProjectId) return
+
+      if (payload.action === 'renamed' && payload.old_path) {
+        // Atomically remove old entries and reload from server
+        set((s) => ({
+          files: s.files.filter((f) => f.path !== payload.old_path && !f.path.startsWith(payload.old_path + '/')),
+        }))
+        get().loadFiles(payload.project_id)
+        return
+      }
 
       set((s) => {
         let files = [...s.files]
         if (payload.action === 'deleted') {
-          files = files.filter((f) => f.path !== payload.path)
+          files = files.filter((f) => f.path !== payload.path && !f.path.startsWith(payload.path + '/'))
         } else {
           const existing = files.findIndex((f) => f.path === payload.path)
           const fileEntry: ProjectFile = {
@@ -172,5 +179,5 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   openFile: (path) => set({ mainView: { type: 'editor', filePath: path } }),
 
-  getFileTree: () => buildFileTree(get().files),
+  getArboristTree: () => buildArboristTree(get().files),
 }))

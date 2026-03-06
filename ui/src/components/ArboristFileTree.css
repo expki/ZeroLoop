@@ -1,0 +1,109 @@
+.arb-tree-container {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.arb-empty {
+  padding: var(--spacing-md);
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  min-height: 60px;
+}
+
+/* react-arborist tree overrides */
+.arb-tree {
+  font-size: var(--font-size-sm);
+}
+
+.arb-tree [role="treeitem"] {
+  outline: none;
+}
+
+/* Node row */
+.arb-node {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--spacing-sm);
+  height: 28px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+  user-select: none;
+  border-radius: var(--radius-sm);
+  margin: 0 4px;
+}
+
+.arb-node:hover {
+  background: var(--color-bg-hover);
+}
+
+.arb-node.selected {
+  background: var(--color-bg-active);
+}
+
+.arb-node.drop-target {
+  border-left: 2px solid var(--color-primary);
+  background: var(--color-primary-muted);
+}
+
+.arb-node.editing {
+  background: transparent;
+}
+
+/* Expand arrow */
+.arb-arrow {
+  font-size: 16px;
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.arb-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+/* File/folder icon */
+.arb-icon {
+  font-size: 16px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+/* File name */
+.arb-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.arb-name.dir-name {
+  font-weight: 500;
+}
+
+/* Cut items (applied via JS class) */
+.arb-node.cut {
+  opacity: 0.5;
+  filter: grayscale(30%);
+}
+
+/* Inline rename input */
+.arb-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  outline: none;
+}
+
+.arb-rename-input:focus {
+  box-shadow: 0 0 0 1px var(--color-primary);
+}

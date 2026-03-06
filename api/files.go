@@ -6,12 +6,14 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/expki/ZeroLoop.git/database"
 	"github.com/expki/ZeroLoop.git/filemanager"
 	"github.com/expki/ZeroLoop.git/logger"
 	"github.com/expki/ZeroLoop.git/models"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func listProjectFiles(w http.ResponseWriter, r *http.Request, fm *filemanager.FileManager) {
@@ -91,7 +93,7 @@ func createProjectFile(w http.ResponseWriter, r *http.Request, fm *filemanager.F
 	database.Get().Create(&pf)
 
 	// Broadcast file_created event
-	broadcastFileEvent(hub, projectID, filePath, name, int64(len(req.Content)), "created")
+	broadcastFileEvent(hub, projectID, filePath, name, int64(len(req.Content)), "created", "")
 
 	writeJSON(w, http.StatusCreated, pf)
 }
@@ -121,7 +123,7 @@ func updateProjectFile(w http.ResponseWriter, r *http.Request, fm *filemanager.F
 		Updates(map[string]any{"size": size})
 
 	// Broadcast file_changed event
-	broadcastFileEvent(hub, projectID, filePath, filepath.Base(filePath), size, "changed")
+	broadcastFileEvent(hub, projectID, filePath, filepath.Base(filePath), size, "changed", "")
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"path": filePath,
@@ -133,16 +135,19 @@ func deleteProjectFile(w http.ResponseWriter, r *http.Request, fm *filemanager.F
 	projectID := r.PathValue("id")
 	filePath := r.PathValue("path")
 
-	if err := fm.DeleteFile(projectID, filePath); err != nil {
+	// Use recursive delete to handle non-empty directories
+	if err := fm.DeleteFileRecursive(projectID, filePath); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Delete DB metadata
-	database.Get().Where("project_id = ? AND path = ?", projectID, filePath).Delete(&models.ProjectFile{})
+	// Delete DB metadata (the file itself + any nested children)
+	db := database.Get()
+	db.Where("project_id = ? AND path = ?", projectID, filePath).Delete(&models.ProjectFile{})
+	db.Where("project_id = ? AND path LIKE ?", projectID, filePath+"/%").Delete(&models.ProjectFile{})
 
 	// Broadcast file_deleted event
-	broadcastFileEvent(hub, projectID, filePath, filepath.Base(filePath), 0, "deleted")
+	broadcastFileEvent(hub, projectID, filePath, filepath.Base(filePath), 0, "deleted", "")
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -197,22 +202,89 @@ func uploadProjectFiles(w http.ResponseWriter, r *http.Request, fm *filemanager.
 			db.Create(&pf)
 			uploaded = append(uploaded, pf)
 
-			broadcastFileEvent(hub, projectID, fh.Filename, pf.Name, size, "created")
+			broadcastFileEvent(hub, projectID, fh.Filename, pf.Name, size, "created", "")
 		}
 	}
 
 	writeJSON(w, http.StatusCreated, uploaded)
 }
 
+func moveProjectFile(w http.ResponseWriter, r *http.Request, fm *filemanager.FileManager, hub *Hub) {
+	projectID := r.PathValue("id")
+
+	var req struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.From == "" || req.To == "" {
+		writeError(w, http.StatusBadRequest, "from and to are required")
+		return
+	}
+
+	// Perform the filesystem rename
+	err := fm.RenameFile(projectID, req.From, req.To)
+	if err != nil {
+		if strings.Contains(err.Error(), "destination already exists") {
+			writeError(w, http.StatusConflict, "destination already exists")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Update DB metadata in a transaction
+	db := database.Get()
+	txErr := db.Transaction(func(tx *gorm.DB) error {
+		// Update the moved/renamed entry itself
+		tx.Model(&models.ProjectFile{}).
+			Where("project_id = ? AND path = ?", projectID, req.From).
+			Updates(map[string]any{
+				"path": req.To,
+				"name": filepath.Base(req.To),
+			})
+
+		// For directory rename: update all nested paths
+		oldPrefix := req.From + "/"
+		newPrefix := req.To + "/"
+		var nested []models.ProjectFile
+		tx.Where("project_id = ? AND path LIKE ?", projectID, oldPrefix+"%").Find(&nested)
+		for _, f := range nested {
+			newNestedPath := newPrefix + strings.TrimPrefix(f.Path, oldPrefix)
+			tx.Model(&f).Updates(map[string]any{
+				"path": newNestedPath,
+				"name": filepath.Base(newNestedPath),
+			})
+		}
+		return nil
+	})
+	if txErr != nil {
+		logger.Log.Errorw("rename DB transaction failed", "error", txErr,
+			"project_id", projectID, "from", req.From, "to", req.To)
+	}
+
+	// Broadcast a single atomic rename event
+	broadcastFileEvent(hub, projectID, req.To, filepath.Base(req.To), 0, "renamed", req.From)
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"from": req.From,
+		"to":   req.To,
+	})
+}
+
 // broadcastFileEvent sends a file event to all clients subscribed to the project.
-func broadcastFileEvent(hub *Hub, projectID, path, name string, size int64, action string) {
-	eventData, _ := json.Marshal(map[string]any{
+// For rename events, pass the old path as oldPath; for other events pass "".
+func broadcastFileEvent(hub *Hub, projectID, path, name string, size int64, action string, oldPath string) {
+	payload := map[string]any{
 		"project_id": projectID,
 		"path":       path,
 		"name":       name,
 		"size":       size,
 		"action":     action,
-	})
+	}
+	if oldPath != "" {
+		payload["old_path"] = oldPath
+	}
+	eventData, _ := json.Marshal(payload)
 	hub.broadcastToProject(projectID, WSMessage{
 		Type:    "file_event",
 		Payload: eventData,

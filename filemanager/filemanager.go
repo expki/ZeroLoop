@@ -55,6 +55,11 @@ func (fm *FileManager) ValidatePath(projectID, relPath string) (string, error) {
 		return "", fmt.Errorf("path traversal not allowed")
 	}
 
+	// Reject "." — operating on the project root itself is not allowed
+	if cleaned == "." {
+		return "", fmt.Errorf("cannot operate on project root")
+	}
+
 	projectDir := fm.ProjectDir(projectID)
 	absPath := filepath.Join(projectDir, cleaned)
 
@@ -158,6 +163,62 @@ func (fm *FileManager) CreateDir(projectID, relPath string) error {
 		return err
 	}
 	return os.MkdirAll(absPath, 0755)
+}
+
+// RenameFile moves/renames a file or directory within a project.
+// Both oldPath and newPath are relative to the project root.
+func (fm *FileManager) RenameFile(projectID, oldRelPath, newRelPath string) error {
+	oldAbs, err := fm.ValidatePath(projectID, oldRelPath)
+	if err != nil {
+		return fmt.Errorf("invalid source path: %w", err)
+	}
+	newAbs, err := fm.ValidatePath(projectID, newRelPath)
+	if err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
+
+	// Check source exists
+	if _, err := os.Stat(oldAbs); os.IsNotExist(err) {
+		return fmt.Errorf("source does not exist")
+	}
+
+	// Prevent moving a directory into a subdirectory of itself
+	if strings.HasPrefix(newAbs+string(filepath.Separator), oldAbs+string(filepath.Separator)) {
+		return fmt.Errorf("cannot move a directory into itself")
+	}
+
+	// Check destination does not already exist
+	if _, err := os.Stat(newAbs); err == nil {
+		return fmt.Errorf("destination already exists")
+	}
+
+	// Ensure destination parent directory exists
+	if err := os.MkdirAll(filepath.Dir(newAbs), 0755); err != nil {
+		return err
+	}
+
+	// Lock both paths (alphabetical order to prevent deadlocks)
+	first, second := oldAbs, newAbs
+	if newAbs < oldAbs {
+		first, second = newAbs, oldAbs
+	}
+	fm.Locks.Lock(first)
+	defer fm.Locks.Unlock(first)
+	fm.Locks.Lock(second)
+	defer fm.Locks.Unlock(second)
+
+	return os.Rename(oldAbs, newAbs)
+}
+
+// DeleteFileRecursive removes a file or directory (and all contents) from the project.
+func (fm *FileManager) DeleteFileRecursive(projectID, relPath string) error {
+	absPath, err := fm.ValidatePath(projectID, relPath)
+	if err != nil {
+		return err
+	}
+	fm.Locks.Lock(absPath)
+	defer fm.Locks.Unlock(absPath)
+	return os.RemoveAll(absPath)
 }
 
 // ListFiles returns metadata for all files in the project directory (recursive).

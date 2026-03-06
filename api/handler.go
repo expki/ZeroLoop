@@ -45,6 +45,9 @@ func RegisterRoutes(mux *http.ServeMux, hub *Hub, fm *filemanager.FileManager) {
 	mux.HandleFunc("POST /api/projects/{id}/upload", func(w http.ResponseWriter, r *http.Request) {
 		uploadProjectFiles(w, r, fm, hub)
 	})
+	mux.HandleFunc("POST /api/projects/{id}/files/_move", func(w http.ResponseWriter, r *http.Request) {
+		moveProjectFile(w, r, fm, hub)
+	})
 
 	// Chat routes
 	mux.HandleFunc("GET /api/chats", listChats)

@@ -58,6 +58,18 @@ export const api = {
   deleteProjectFile: (projectId: string, path: string) =>
     request<void>(`/projects/${projectId}/files/${path}`, { method: 'DELETE' }),
 
+  moveProjectFile: (projectId: string, from: string, to: string) =>
+    request<{ from: string; to: string }>(`/projects/${projectId}/files/_move`, {
+      method: 'POST',
+      body: JSON.stringify({ from, to }),
+    }),
+
+  createProjectDir: (projectId: string, path: string) =>
+    request<ProjectFile>(`/projects/${projectId}/files/${path}`, {
+      method: 'POST',
+      body: JSON.stringify({ is_dir: true }),
+    }),
+
   uploadProjectFiles: async (projectId: string, files: FileList): Promise<ProjectFile[]> => {
     const formData = new FormData()
     for (let i = 0; i < files.length; i++) {
