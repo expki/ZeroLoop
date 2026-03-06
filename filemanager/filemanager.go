@@ -221,6 +221,86 @@ func (fm *FileManager) DeleteFileRecursive(projectID, relPath string) error {
 	return os.RemoveAll(absPath)
 }
 
+// SearchResult represents a single match within a file.
+type SearchResult struct {
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Column  int    `json:"column"`
+	Content string `json:"content"`
+}
+
+// SearchFiles searches for a query string across all files in a project directory.
+// Returns matches with file path, line number, column, and the matching line content.
+// Skips binary files and caps results at maxResults.
+func (fm *FileManager) SearchFiles(projectID, query string, maxResults int) ([]SearchResult, error) {
+	projectDir := fm.ProjectDir(projectID)
+	if _, err := os.Stat(projectDir); os.IsNotExist(err) {
+		return []SearchResult{}, nil
+	}
+
+	queryLower := strings.ToLower(query)
+	var results []SearchResult
+
+	err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if len(results) >= maxResults {
+			return filepath.SkipAll
+		}
+
+		relPath, _ := filepath.Rel(projectDir, path)
+
+		// Read file content
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil // skip unreadable files
+		}
+
+		// Skip binary files (check first 512 bytes for null bytes)
+		checkLen := len(data)
+		if checkLen > 512 {
+			checkLen = 512
+		}
+		for i := 0; i < checkLen; i++ {
+			if data[i] == 0 {
+				return nil // binary file
+			}
+		}
+
+		content := string(data)
+		contentLower := strings.ToLower(content)
+		lines := strings.Split(content, "\n")
+		pos := 0
+
+		for lineNum, line := range lines {
+			lineLower := strings.ToLower(line)
+			col := strings.Index(lineLower, queryLower)
+			if col >= 0 {
+				results = append(results, SearchResult{
+					Path:    relPath,
+					Line:    lineNum + 1,
+					Column:  col + 1,
+					Content: line,
+				})
+				if len(results) >= maxResults {
+					return filepath.SkipAll
+				}
+			}
+			pos += len(line) + 1
+		}
+		_ = pos
+		_ = contentLower
+
+		return nil
+	})
+	if err != nil && err != filepath.SkipAll {
+		return nil, err
+	}
+
+	return results, nil
+}
+
 // ListFiles returns metadata for all files in the project directory (recursive).
 func (fm *FileManager) ListFiles(projectID string) ([]FileInfo, error) {
 	projectDir := fm.ProjectDir(projectID)

@@ -344,7 +344,7 @@ function ArboristFileTree({ projectId }: ArboristFileTreeProps) {
           childrenAccessor="children"
           openByDefault={false}
           width="100%"
-          height={1000}
+          height={files.length * 28}
           rowHeight={28}
           indent={16}
           onActivate={handleActivate}

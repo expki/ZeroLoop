@@ -8,6 +8,9 @@ export default defineConfig({
     outDir: '../dist',
     emptyOutDir: false,
   },
+  optimizeDeps: {
+    include: ['monaco-editor/esm/vs/editor/editor.api'],
+  },
   server: {
     host: '0.0.0.0',
     port: 9369,

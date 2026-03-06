@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Project, ProjectFile, ArboristNode, MainView } from '../types'
 import { api } from '../services/api'
 import { ws } from '../services/websocket'
+import { useEditorStore } from './editorStore'
 
 interface ProjectState {
   projects: Project[]
@@ -75,6 +76,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     ws.on('file_event', (payload: { project_id: string; path: string; name: string; size: number; action: string; old_path?: string }) => {
       const state = get()
       if (payload.project_id !== state.selectedProjectId) return
+
+      // Forward file events to editor store for tab management
+      useEditorStore.getState().handleFileEvent(payload.action, payload.path, payload.old_path)
 
       if (payload.action === 'renamed' && payload.old_path) {
         // Atomically remove old entries and reload from server
@@ -177,7 +181,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setMainView: (view) => set({ mainView: view }),
 
-  openFile: (path) => set({ mainView: { type: 'editor', filePath: path } }),
+  openFile: (path) => {
+    set({ mainView: { type: 'editor' } })
+    const projectId = get().selectedProjectId
+    if (projectId) {
+      useEditorStore.getState().initForProject(projectId)
+    }
+    useEditorStore.getState().openTab(path)
+  },
 
   getArboristTree: () => buildArboristTree(get().files),
 }))

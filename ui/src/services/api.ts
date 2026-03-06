@@ -120,6 +120,11 @@ export const api = {
       body: JSON.stringify({ message_no: messageNo || 0 }),
     }),
 
+  searchProjectFiles: (projectId: string, query: string, max?: number) =>
+    request<{ path: string; line: number; column: number; content: string }[]>(
+      `/projects/${projectId}/search?q=${encodeURIComponent(query)}${max ? `&max=${max}` : ''}`
+    ),
+
   checkLLMHealth: () => request<{ status: string }>('/health/llm'),
 
   codeComplete: async (
@@ -139,6 +144,26 @@ export const api = {
       return res.json()
     } catch {
       return { text: '' }
+    }
+  },
+
+  smartCodeComplete: async (
+    prefix: string,
+    suffix: string,
+    filename: string,
+    signal?: AbortSignal
+  ): Promise<{ text: string; skipped: boolean }> => {
+    try {
+      const res = await fetch(`${API_BASE}/completions/smart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefix, suffix, filename }),
+        signal,
+      })
+      if (!res.ok) return { text: '', skipped: true }
+      return res.json()
+    } catch {
+      return { text: '', skipped: true }
     }
   },
 }

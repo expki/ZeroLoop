@@ -6,7 +6,7 @@ import { ws } from './services/websocket'
 import ProjectList from './components/ProjectList'
 import ProjectSidebar from './components/ProjectSidebar'
 import ChatArea from './components/ChatArea'
-import FileEditor from './components/FileEditor'
+import MonacoIDE from './components/MonacoIDE'
 import WelcomeScreen from './components/WelcomeScreen'
 import './App.css'
 
@@ -45,7 +45,7 @@ function App() {
   // Project selected: show sidebar + main content
   let mainContent
   if (mainView.type === 'editor') {
-    mainContent = <FileEditor filePath={mainView.filePath} />
+    mainContent = <MonacoIDE />
   } else if (selectedChatId) {
     mainContent = <ChatArea />
   } else {

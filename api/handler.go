@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/expki/ZeroLoop.git/database"
 	"github.com/expki/ZeroLoop.git/filemanager"
@@ -48,6 +50,9 @@ func RegisterRoutes(mux *http.ServeMux, hub *Hub, fm *filemanager.FileManager) {
 	mux.HandleFunc("POST /api/projects/{id}/files/_move", func(w http.ResponseWriter, r *http.Request) {
 		moveProjectFile(w, r, fm, hub)
 	})
+	mux.HandleFunc("GET /api/projects/{id}/search", func(w http.ResponseWriter, r *http.Request) {
+		searchProjectFiles(w, r, fm)
+	})
 
 	// Chat routes
 	mux.HandleFunc("GET /api/chats", listChats)
@@ -67,6 +72,9 @@ func RegisterRoutes(mux *http.ServeMux, hub *Hub, fm *filemanager.FileManager) {
 	})
 	mux.HandleFunc("POST /api/completions", func(w http.ResponseWriter, r *http.Request) {
 		codeCompletion(w, r, hub)
+	})
+	mux.HandleFunc("POST /api/completions/smart", func(w http.ResponseWriter, r *http.Request) {
+		smartCodeCompletion(w, r, hub)
 	})
 }
 
@@ -340,4 +348,142 @@ func codeCompletion(w http.ResponseWriter, r *http.Request, hub *Hub) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"text": resp.Content})
+}
+
+func smartCodeCompletion(w http.ResponseWriter, r *http.Request, hub *Hub) {
+	var req struct {
+		Prefix   string `json:"prefix"`
+		Suffix   string `json:"suffix"`
+		Filename string `json:"filename"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 256<<10)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Prefix == "" && req.Suffix == "" {
+		writeError(w, http.StatusBadRequest, "prefix or suffix is required")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Build evaluation context: last 20 lines of prefix, first 10 of suffix
+	prefixLines := strings.Split(req.Prefix, "\n")
+	suffixLines := strings.Split(req.Suffix, "\n")
+	evalPrefix := req.Prefix
+	if len(prefixLines) > 20 {
+		evalPrefix = strings.Join(prefixLines[len(prefixLines)-20:], "\n")
+	}
+	evalSuffix := req.Suffix
+	if len(suffixLines) > 10 {
+		evalSuffix = strings.Join(suffixLines[:10], "\n")
+	}
+
+	// Step 1: Evaluate if completion is appropriate using LLM
+	evalPrompt := fmt.Sprintf(`Analyze the code at the cursor position (marked by <CURSOR>) and decide if autocomplete should trigger.
+
+Return ONLY valid JSON: {"complete":true,"max_tokens":N} or {"complete":false}
+
+When to complete (complete=true):
+- Cursor after partial identifier, keyword, operator, dot, arrow, colon, equals, comma
+- Cursor mid-line where more code naturally follows
+- Cursor at end of line where a continuation is expected (opening brace, arrow function, etc.)
+- Cursor after indentation on a new line inside a code block
+
+When NOT to complete (complete=false):
+- Cursor on an empty/blank line between complete, separate code blocks
+- Cursor right after a complete closing brace/block with no continuation expected
+- Cursor inside a finished standalone comment
+- File is empty or has no meaningful code context
+
+max_tokens guide: 16 (finish current word/expression), 32 (complete current line/short statement), 64 (multi-line block, 2-4 lines), 128 (function body or larger block)
+
+File: %s
+
+%s<CURSOR>%s`, req.Filename, evalPrefix, evalSuffix)
+
+	messages := []llm.ChatMessage{
+		{Role: "user", Content: evalPrompt},
+	}
+
+	evalResult, err := hub.llmClient.ChatCompletion(ctx, messages, nil, &llm.CompletionRequest{
+		NPredict:    50,
+		Temperature: 0.1,
+	})
+	if err != nil {
+		logger.Log.Debugw("smart completion eval failed, falling back to infill", "error", err)
+		// Fall back to standard infill on evaluation failure
+		fallbackInfill(w, r, hub, req.Prefix, req.Suffix)
+		return
+	}
+
+	// Parse evaluation result
+	type evalResponse struct {
+		Complete  bool `json:"complete"`
+		MaxTokens int  `json:"max_tokens"`
+	}
+	var eval evalResponse
+	content := strings.TrimSpace(evalResult.Content)
+	// Extract JSON object from response (model might include extra text)
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+	if start >= 0 && end > start {
+		content = content[start : end+1]
+	}
+	if err := json.Unmarshal([]byte(content), &eval); err != nil {
+		logger.Log.Debugw("smart completion eval parse failed, defaulting to complete", "content", evalResult.Content, "error", err)
+		eval.Complete = true
+		eval.MaxTokens = 64
+	}
+
+	if !eval.Complete {
+		writeJSON(w, http.StatusOK, map[string]any{"text": "", "skipped": true})
+		return
+	}
+
+	// Clamp max_tokens to reasonable bounds
+	if eval.MaxTokens <= 0 {
+		eval.MaxTokens = 64
+	}
+	if eval.MaxTokens > 256 {
+		eval.MaxTokens = 256
+	}
+
+	// Step 2: Perform the actual infill completion
+	infillReq := &llm.InfillRequest{
+		InputPrefix: req.Prefix,
+		InputSuffix: req.Suffix,
+		NPredict:    eval.MaxTokens,
+		Temperature: 0.2,
+		Stop:        []string{"\n\n"},
+	}
+
+	resp, err := hub.llmClient.Infill(ctx, infillReq)
+	if err != nil {
+		logger.Log.Debugw("smart completion infill failed", "error", err)
+		writeJSON(w, http.StatusOK, map[string]any{"text": "", "skipped": false})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"text": resp.Content, "skipped": false})
+}
+
+// fallbackInfill performs a standard infill when smart evaluation fails
+func fallbackInfill(w http.ResponseWriter, r *http.Request, hub *Hub, prefix, suffix string) {
+	infillReq := &llm.InfillRequest{
+		InputPrefix: prefix,
+		InputSuffix: suffix,
+		NPredict:    64,
+		Temperature: 0.2,
+		Stop:        []string{"\n\n"},
+	}
+
+	resp, err := hub.llmClient.Infill(r.Context(), infillReq)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"text": "", "skipped": false})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"text": resp.Content, "skipped": false})
 }

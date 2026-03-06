@@ -55,7 +55,7 @@
   padding: 2px;
 }
 
-/* Override file tree overflow in section */
+/* File tree scrolls within section bounds */
 .sidebar-section .arb-tree-container {
   overflow-y: auto;
   flex: 1;

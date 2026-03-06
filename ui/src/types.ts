@@ -61,7 +61,7 @@ export interface ArboristNode {
 
 export type MainView =
   | { type: 'chat' }
-  | { type: 'editor'; filePath: string }
+  | { type: 'editor' }
 
 export type DetailMode = 'collapsed' | 'list' | 'current' | 'expanded'
 export type ChatWidth = '40em' | '55em' | '80em' | 'full'
