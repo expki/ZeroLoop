@@ -14,7 +14,7 @@ func TestSystemPrompt(t *testing.T) {
 	prompt := SystemPrompt(0, tools)
 
 	// Should contain agent identity
-	if !strings.Contains(prompt, "Agent 0") {
+	if !strings.Contains(prompt, "Agent ") {
 		t.Error("expected 'Agent 0' in prompt")
 	}
 

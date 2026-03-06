@@ -20,7 +20,7 @@ const (
 
 type Message struct {
 	ID        string      `gorm:"primaryKey;type:text" json:"id"`
-	ChatID    string      `gorm:"type:text;not null;index" json:"chat_id"`
+	AgentID   string      `gorm:"column:chat_id;type:text;not null;index" json:"agent_id"`
 	No        int         `gorm:"not null" json:"no"`
 	Type      MessageType `gorm:"type:text;not null" json:"type"`
 	Heading   string      `gorm:"type:text;not null;default:''" json:"heading"`

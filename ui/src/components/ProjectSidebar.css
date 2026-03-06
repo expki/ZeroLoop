@@ -61,8 +61,14 @@
   flex: 1;
 }
 
-/* Override chat list in section */
-.sidebar-section-grow .chat-list {
+/* Override agent list in section */
+.sidebar-section-grow .agent-list {
   flex: 1;
   overflow-y: auto;
+}
+
+/* Terminal list in section */
+.sidebar-section .terminal-list {
+  overflow-y: auto;
+  flex: 1;
 }

@@ -20,8 +20,10 @@ type FileInfo struct {
 
 // FileManager handles filesystem operations for project files with path validation and locking.
 type FileManager struct {
-	baseDir string
-	Locks   *FileLockManager
+	baseDir  string
+	Locks    *FileLockManager
+	// Resolver maps a project ID to a folder name. If nil or returns "", the ID is used as-is.
+	Resolver func(projectID string) string
 }
 
 // New creates a new FileManager rooted at the given base directory.
@@ -34,7 +36,13 @@ func New(baseDir string) *FileManager {
 
 // ProjectDir returns the absolute path for a project's directory.
 func (fm *FileManager) ProjectDir(projectID string) string {
-	return filepath.Join(fm.baseDir, projectID)
+	folder := projectID
+	if fm.Resolver != nil {
+		if name := fm.Resolver(projectID); name != "" {
+			folder = name
+		}
+	}
+	return filepath.Join(fm.baseDir, folder)
 }
 
 // ValidatePath validates and resolves a relative path within a project directory.

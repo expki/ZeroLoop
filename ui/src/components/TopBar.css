@@ -15,7 +15,7 @@
   min-width: 0;
 }
 
-.topbar-chat-name {
+.topbar-agent-name {
   font-size: var(--font-size-sm);
   font-weight: 500;
   color: var(--color-text);

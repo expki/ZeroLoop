@@ -1,47 +1,65 @@
 import { useState, useEffect } from 'react'
 import { useProjectStore } from '../stores/projectStore'
-import { useChatStore } from '../stores/chatStore'
+import { useAgentStore } from '../stores/agentStore'
+import { useTerminalStore } from '../stores/terminalStore'
 import { useUIStore } from '../stores/uiStore'
 import ArboristFileTree from './ArboristFileTree'
-import type { ChatWidth, DetailMode } from '../types'
+import type { AgentWidth, DetailMode } from '../types'
 import './Sidebar.css'
 import './ProjectSidebar.css'
 
 function ProjectSidebar() {
   const { selectedProjectId, selectProject, projects, loadFiles } = useProjectStore()
-  const { chats, selectedChatId, selectChat, createChat, deleteChat, loadChatsForProject } = useChatStore()
+  const { agents, selectedAgentId, selectAgent, createAgent, deleteAgent, loadAgentsForProject } = useAgentStore()
+  const { terminals, selectedTerminalId, selectTerminal, createTerminal, deleteTerminal, loadTerminalsForProject } = useTerminalStore()
   const {
     sidebarOpen, toggleSidebar, theme, toggleTheme,
-    chatWidth, setChatWidth, detailMode, setDetailMode, setSidebarOpen,
+    agentWidth, setAgentWidth, detailMode, setDetailMode, setSidebarOpen,
   } = useUIStore()
   const [prefsOpen, setPrefsOpen] = useState(false)
 
   const project = projects.find((p) => p.id === selectedProjectId)
 
-  // Load chats and files when project changes
+  // Load agents, terminals, and files when project changes
   useEffect(() => {
     if (selectedProjectId) {
-      loadChatsForProject(selectedProjectId)
+      loadAgentsForProject(selectedProjectId)
+      loadTerminalsForProject(selectedProjectId)
       loadFiles(selectedProjectId)
     }
-  }, [selectedProjectId, loadChatsForProject, loadFiles])
+  }, [selectedProjectId, loadAgentsForProject, loadTerminalsForProject, loadFiles])
 
-  const handleSelectChat = (id: string) => {
-    selectChat(id)
-    useProjectStore.getState().setMainView({ type: 'chat' })
+  const handleSelectAgent = (id: string) => {
+    selectAgent(id)
+    useProjectStore.getState().setMainView({ type: 'agent' })
     if (window.innerWidth < 768) {
       setSidebarOpen(false)
     }
   }
 
-  const handleNewChat = () => {
+  const handleNewAgent = () => {
     if (selectedProjectId) {
-      createChat(selectedProjectId)
-      useProjectStore.getState().setMainView({ type: 'chat' })
+      createAgent(selectedProjectId)
+      useProjectStore.getState().setMainView({ type: 'agent' })
     }
   }
 
-  const widthOptions: { label: string; value: ChatWidth }[] = [
+  const handleSelectTerminal = (id: string) => {
+    selectTerminal(id)
+    useProjectStore.getState().setMainView({ type: 'terminal' })
+    if (window.innerWidth < 768) {
+      setSidebarOpen(false)
+    }
+  }
+
+  const handleNewTerminal = () => {
+    if (selectedProjectId) {
+      createTerminal(selectedProjectId)
+      useProjectStore.getState().setMainView({ type: 'terminal' })
+    }
+  }
+
+  const widthOptions: { label: string; value: AgentWidth }[] = [
     { label: 'S', value: '40em' },
     { label: 'M', value: '55em' },
     { label: 'L', value: '80em' },
@@ -82,30 +100,63 @@ function ProjectSidebar() {
         {selectedProjectId && <ArboristFileTree projectId={selectedProjectId} />}
       </div>
 
-      {/* Chats section */}
-      <div className="sidebar-section sidebar-section-grow">
+      {/* Terminals section */}
+      <div className="sidebar-section">
         <div className="sidebar-section-header">
-          <span className="sidebar-section-title">Chats</span>
-          <button className="icon-button" onClick={handleNewChat} title="New chat">
+          <span className="sidebar-section-title">Terminals</span>
+          <button className="icon-button" onClick={handleNewTerminal} title="New terminal">
             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
           </button>
         </div>
-        <div className="chat-list">
-          {chats.length === 0 ? (
-            <div className="chat-list-empty">No chats yet</div>
+        <div className="terminal-list">
+          {terminals.length === 0 ? (
+            <div className="terminal-list-empty">No terminals yet</div>
           ) : (
-            chats.map((chat) => (
+            terminals.map((terminal) => (
               <div
-                key={chat.id}
-                className={`chat-item ${selectedChatId === chat.id ? 'active' : ''}`}
-                onClick={() => handleSelectChat(chat.id)}
+                key={terminal.id}
+                className={`terminal-item ${selectedTerminalId === terminal.id ? 'active' : ''}`}
+                onClick={() => handleSelectTerminal(terminal.id)}
               >
-                <div className={`chat-status-dot ${chat.running ? 'running' : ''}`} />
-                <span className="chat-name">{chat.name}</span>
+                <span className="material-symbols-outlined terminal-icon">terminal</span>
+                <span className="terminal-name">{terminal.name}</span>
                 <button
-                  className="chat-close icon-button"
-                  onClick={(e) => { e.stopPropagation(); deleteChat(chat.id) }}
-                  title="Remove chat"
+                  className="terminal-close icon-button"
+                  onClick={(e) => { e.stopPropagation(); deleteTerminal(terminal.id) }}
+                  title="Remove terminal"
+                >
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Agents section */}
+      <div className="sidebar-section sidebar-section-grow">
+        <div className="sidebar-section-header">
+          <span className="sidebar-section-title">Agents</span>
+          <button className="icon-button" onClick={handleNewAgent} title="New agent">
+            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
+          </button>
+        </div>
+        <div className="agent-list">
+          {agents.length === 0 ? (
+            <div className="agent-list-empty">No agents yet</div>
+          ) : (
+            agents.map((agent) => (
+              <div
+                key={agent.id}
+                className={`agent-item ${selectedAgentId === agent.id ? 'active' : ''}`}
+                onClick={() => handleSelectAgent(agent.id)}
+              >
+                <div className={`agent-status-dot ${agent.running ? 'running' : ''}`} />
+                <span className="agent-name">{agent.name}</span>
+                <button
+                  className="agent-close icon-button"
+                  onClick={(e) => { e.stopPropagation(); deleteAgent(agent.id) }}
+                  title="Remove agent"
                 >
                   <span className="material-symbols-outlined">close</span>
                 </button>
@@ -143,8 +194,8 @@ function ProjectSidebar() {
                   {widthOptions.map((opt) => (
                     <button
                       key={opt.value}
-                      className={`btn-group-item ${chatWidth === opt.value ? 'active' : ''}`}
-                      onClick={() => setChatWidth(opt.value)}
+                      className={`btn-group-item ${agentWidth === opt.value ? 'active' : ''}`}
+                      onClick={() => setAgentWidth(opt.value)}
                     >
                       {opt.label}
                     </button>

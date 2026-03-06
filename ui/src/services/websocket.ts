@@ -10,7 +10,7 @@ type ReconnectCallback = () => void
 
 class WebSocketService {
   private ws: WebSocket | null = null
-  private url: string
+  private url: string | null = null
   private handlers: Map<string, WSMessageHandler[]> = new Map()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay = 1000
@@ -18,16 +18,19 @@ class WebSocketService {
   private intentionalClose = false
   private reconnectCallbacks: ReconnectCallback[] = []
 
-  constructor() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    this.url = `${protocol}//${window.location.host}/ws`
+  private getUrl(): string {
+    if (!this.url) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      this.url = `${protocol}//${window.location.host}/ws`
+    }
+    return this.url
   }
 
   connect() {
     if (this.ws?.readyState === WebSocket.OPEN) return
 
     this.intentionalClose = false
-    this.ws = new WebSocket(this.url)
+    this.ws = new WebSocket(this.getUrl())
 
     this.ws.onopen = () => {
       this.reconnectDelay = 1000

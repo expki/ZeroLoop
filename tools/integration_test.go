@@ -27,7 +27,7 @@ func testAgent(t *testing.T) (*agent.Agent, *logCollector) {
 	t.Helper()
 	lc := &logCollector{}
 	a := agent.New(&llm.Client{}, agent.NewToolRegistry(), lc.callback)
-	a.ChatID = "test-chat"
+	a.AgentID = "test-agent"
 	return a, lc
 }
 

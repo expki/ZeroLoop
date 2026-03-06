@@ -13,66 +13,66 @@ describe('api', () => {
     vi.restoreAllMocks()
   })
 
-  it('lists chats', async () => {
-    const chats = [{ id: '1', project_id: 'p1', name: 'Test', created_at: '2024-01-01', running: false }]
+  it('lists agents', async () => {
+    const agents = [{ id: '1', project_id: 'p1', name: 'Test', created_at: '2024-01-01', running: false }]
     mockFetch.mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve(chats),
+      json: () => Promise.resolve(agents),
     })
 
-    const result = await api.listChats()
-    expect(result).toEqual(chats)
-    expect(mockFetch).toHaveBeenCalledWith('/api/chats', expect.objectContaining({
+    const result = await api.listAgents()
+    expect(result).toEqual(agents)
+    expect(mockFetch).toHaveBeenCalledWith('/api/agents', expect.objectContaining({
       headers: { 'Content-Type': 'application/json' },
     }))
   })
 
-  it('creates a chat', async () => {
-    const chat = { id: '2', project_id: 'p1', name: 'My Chat', created_at: '2024-01-01', running: false }
+  it('creates an agent', async () => {
+    const agent = { id: '2', project_id: 'p1', name: 'My Agent', created_at: '2024-01-01', running: false }
     mockFetch.mockResolvedValue({
       ok: true,
       status: 201,
-      json: () => Promise.resolve(chat),
+      json: () => Promise.resolve(agent),
     })
 
-    const result = await api.createChat('p1', 'My Chat')
-    expect(result).toEqual(chat)
-    expect(mockFetch).toHaveBeenCalledWith('/api/chats', expect.objectContaining({
+    const result = await api.createAgent('p1', 'My Agent')
+    expect(result).toEqual(agent)
+    expect(mockFetch).toHaveBeenCalledWith('/api/agents', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ name: 'My Chat', project_id: 'p1' }),
+      body: JSON.stringify({ name: 'My Agent', project_id: 'p1' }),
     }))
   })
 
-  it('creates a chat with default name', async () => {
-    const chat = { id: '3', project_id: 'p1', name: 'New Chat', created_at: '2024-01-01', running: false }
+  it('creates an agent with default name', async () => {
+    const agent = { id: '3', project_id: 'p1', name: 'New Agent', created_at: '2024-01-01', running: false }
     mockFetch.mockResolvedValue({
       ok: true,
       status: 201,
-      json: () => Promise.resolve(chat),
+      json: () => Promise.resolve(agent),
     })
 
-    const result = await api.createChat('p1')
-    expect(result).toEqual(chat)
-    expect(mockFetch).toHaveBeenCalledWith('/api/chats', expect.objectContaining({
+    const result = await api.createAgent('p1')
+    expect(result).toEqual(agent)
+    expect(mockFetch).toHaveBeenCalledWith('/api/agents', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ name: 'New Chat', project_id: 'p1' }),
+      body: JSON.stringify({ name: 'New Agent', project_id: 'p1' }),
     }))
   })
 
-  it('deletes a chat', async () => {
+  it('deletes an agent', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       status: 204,
     })
 
-    await api.deleteChat('abc')
-    expect(mockFetch).toHaveBeenCalledWith('/api/chats/abc', expect.objectContaining({
+    await api.deleteAgent('abc')
+    expect(mockFetch).toHaveBeenCalledWith('/api/agents/abc', expect.objectContaining({
       method: 'DELETE',
     }))
   })
 
-  it('gets chat messages', async () => {
+  it('gets agent messages', async () => {
     const messages = [{ id: 'm1', no: 1, type: 'user', heading: '', content: 'hello', timestamp: '2024-01-01', agentno: 0 }]
     mockFetch.mockResolvedValue({
       ok: true,
@@ -80,9 +80,9 @@ describe('api', () => {
       json: () => Promise.resolve(messages),
     })
 
-    const result = await api.getChatMessages('chat1')
+    const result = await api.getAgentMessages('agent1')
     expect(result).toEqual(messages)
-    expect(mockFetch).toHaveBeenCalledWith('/api/chats/chat1/messages', expect.objectContaining({
+    expect(mockFetch).toHaveBeenCalledWith('/api/agents/agent1/messages', expect.objectContaining({
       headers: { 'Content-Type': 'application/json' },
     }))
   })
@@ -95,7 +95,7 @@ describe('api', () => {
       json: () => Promise.resolve({ error: 'something went wrong' }),
     })
 
-    await expect(api.listChats()).rejects.toThrow('something went wrong')
+    await expect(api.listAgents()).rejects.toThrow('something went wrong')
   })
 
   it('handles API errors with non-JSON response', async () => {
@@ -106,6 +106,6 @@ describe('api', () => {
       json: () => Promise.reject(new Error('not json')),
     })
 
-    await expect(api.listChats()).rejects.toThrow('Internal Server Error')
+    await expect(api.listAgents()).rejects.toThrow('Internal Server Error')
   })
 })

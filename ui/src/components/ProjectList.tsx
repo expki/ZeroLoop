@@ -9,14 +9,12 @@ function ProjectList() {
   const { sidebarOpen, toggleSidebar } = useUIStore()
   const [showNew, setShowNew] = useState(false)
   const [newName, setNewName] = useState('')
-  const [newDesc, setNewDesc] = useState('')
 
   const handleCreate = () => {
     const name = newName.trim()
     if (!name) return
-    createProject(name, newDesc.trim())
+    createProject(name)
     setNewName('')
-    setNewDesc('')
     setShowNew(false)
   }
 
@@ -49,13 +47,6 @@ function ProjectList() {
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
               autoFocus
             />
-            <input
-              className="project-input"
-              placeholder="Description (optional)"
-              value={newDesc}
-              onChange={(e) => setNewDesc(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            />
             <div className="new-project-actions">
               <button className="btn-primary" onClick={handleCreate}>Create</button>
               <button className="btn-secondary" onClick={() => setShowNew(false)}>Cancel</button>
@@ -77,9 +68,6 @@ function ProjectList() {
                 </button>
               </div>
               <span className="project-card-name">{project.name}</span>
-              {project.description && (
-                <span className="project-card-desc">{project.description}</span>
-              )}
               <span className="project-card-date">
                 {new Date(project.created_at).toLocaleDateString()}
               </span>

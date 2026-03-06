@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/expki/ZeroLoop.git/database"
 	"github.com/expki/ZeroLoop.git/filemanager"
@@ -23,8 +24,7 @@ func listProjects(w http.ResponseWriter, r *http.Request) {
 
 func createProject(w http.ResponseWriter, r *http.Request, fm *filemanager.FileManager) {
 	var req struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name string `json:"name"`
 	}
 	if r.Body != nil {
 		json.NewDecoder(r.Body).Decode(&req)
@@ -35,13 +35,13 @@ func createProject(w http.ResponseWriter, r *http.Request, fm *filemanager.FileM
 	}
 
 	project := models.Project{
-		ID:          uuid.New().String(),
-		Name:        req.Name,
-		Description: req.Description,
+		ID:   uuid.New().String(),
+		Name: req.Name,
 	}
 
-	// Create filesystem directory
-	if err := fm.CreateProject(project.ID); err != nil {
+	// Create filesystem directory using project name (use existing folder if present)
+	projectDir := fm.ProjectDir(req.Name)
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		logger.Log.Errorw("failed to create project directory", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to create project directory")
 		return
@@ -49,8 +49,6 @@ func createProject(w http.ResponseWriter, r *http.Request, fm *filemanager.FileM
 
 	if err := database.Get().Create(&project).Error; err != nil {
 		logger.Log.Errorw("failed to create project", "error", err)
-		// Clean up directory on DB failure
-		fm.DeleteProject(project.ID)
 		writeError(w, http.StatusInternalServerError, "failed to create project")
 		return
 	}
@@ -61,18 +59,17 @@ func createProject(w http.ResponseWriter, r *http.Request, fm *filemanager.FileM
 func getProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var project models.Project
-	if err := database.Get().Preload("Chats").First(&project, "id = ?", id).Error; err != nil {
+	if err := database.Get().Preload("Agents").First(&project, "id = ?", id).Error; err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, project)
 }
 
-func updateProject(w http.ResponseWriter, r *http.Request) {
+func updateProject(w http.ResponseWriter, r *http.Request, fm *filemanager.FileManager) {
 	id := r.PathValue("id")
 	var req struct {
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
+		Name *string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -80,29 +77,40 @@ func updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db := database.Get()
-	updates := map[string]any{}
-	if req.Name != nil && *req.Name != "" {
-		updates["name"] = *req.Name
-	}
-	if req.Description != nil {
-		updates["description"] = *req.Description
-	}
-	if len(updates) == 0 {
+
+	if req.Name == nil || *req.Name == "" {
 		writeError(w, http.StatusBadRequest, "no fields to update")
 		return
 	}
 
-	result := db.Model(&models.Project{}).Where("id = ?", id).Updates(updates)
-	if result.Error != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update project")
-		return
-	}
-	if result.RowsAffected == 0 {
+	// Look up current project to get old name for folder rename
+	var project models.Project
+	if err := db.First(&project, "id = ?", id).Error; err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
 
-	var project models.Project
+	oldName := project.Name
+	newName := *req.Name
+
+	// Update DB
+	result := db.Model(&project).Update("name", newName)
+	if result.Error != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update project")
+		return
+	}
+
+	// Rename folder on disk if name changed
+	if oldName != newName {
+		oldDir := fm.ProjectDir(oldName)
+		newDir := fm.ProjectDir(newName)
+		if _, err := os.Stat(oldDir); err == nil {
+			if err := os.Rename(oldDir, newDir); err != nil {
+				logger.Log.Warnw("failed to rename project directory", "error", err, "from", oldDir, "to", newDir)
+			}
+		}
+	}
+
 	db.First(&project, "id = ?", id)
 	writeJSON(w, http.StatusOK, project)
 }
@@ -111,22 +119,33 @@ func deleteProject(w http.ResponseWriter, r *http.Request, hub *Hub, fm *fileman
 	id := r.PathValue("id")
 	db := database.Get()
 
-	// Clean up agents for all chats in this project
-	var chats []models.Chat
-	db.Where("project_id = ?", id).Select("id").Find(&chats)
-	for _, chat := range chats {
-		hub.cleanupChat(chat.ID)
+	// Look up project name before deleting (needed for folder name)
+	var project models.Project
+	if err := db.First(&project, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	projectName := project.Name
+
+	// Clean up agents for all agents in this project
+	var agts []models.Agent
+	db.Where("project_id = ?", id).Select("id").Find(&agts)
+	for _, agt := range agts {
+		hub.cleanupAgent(agt.ID)
 	}
 
-	// Delete DB records (cascade deletes chats and messages)
+	// Delete DB records (cascade deletes agents and messages)
 	if err := db.Delete(&models.Project{}, "id = ?", id).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
 	}
 
-	// Delete project files from disk
-	if err := fm.DeleteProject(id); err != nil {
-		logger.Log.Warnw("failed to delete project directory", "error", err, "project_id", id)
+	// Delete project files from disk using project name
+	projectDir := fm.ProjectDir(projectName)
+	if _, err := os.Stat(projectDir); err == nil {
+		if err := os.RemoveAll(projectDir); err != nil {
+			logger.Log.Warnw("failed to delete project directory", "error", err, "project_id", id)
+		}
 	}
 
 	// Clean up project file metadata

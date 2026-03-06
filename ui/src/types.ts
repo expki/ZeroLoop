@@ -14,7 +14,7 @@ export type MessageType =
 
 export interface Message {
   id: string
-  chat_id?: string
+  agent_id?: string
   no: number
   type: MessageType
   heading: string
@@ -25,7 +25,7 @@ export interface Message {
   stream?: boolean
 }
 
-export interface Chat {
+export interface Agent {
   id: string
   project_id: string
   name: string
@@ -36,10 +36,16 @@ export interface Chat {
 export interface Project {
   id: string
   name: string
-  description: string
   created_at: string
   updated_at: string
-  chats?: Chat[]
+  agents?: Agent[]
+}
+
+export interface Terminal {
+  id: string
+  project_id: string
+  name: string
+  created_at: string
 }
 
 export interface ProjectFile {
@@ -60,10 +66,11 @@ export interface ArboristNode {
 }
 
 export type MainView =
-  | { type: 'chat' }
+  | { type: 'agent' }
+  | { type: 'terminal' }
   | { type: 'editor' }
 
 export type DetailMode = 'collapsed' | 'list' | 'current' | 'expanded'
-export type ChatWidth = '40em' | '55em' | '80em' | 'full'
+export type AgentWidth = '40em' | '55em' | '80em' | 'full'
 export type Theme = 'dark' | 'light'
 export type ConnectionStatus = 'connected' | 'degraded' | 'disconnected'

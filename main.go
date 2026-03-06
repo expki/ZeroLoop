@@ -20,6 +20,7 @@ import (
 	"github.com/expki/ZeroLoop.git/filemanager"
 	"github.com/expki/ZeroLoop.git/llm"
 	"github.com/expki/ZeroLoop.git/logger"
+	"github.com/expki/ZeroLoop.git/models"
 	"github.com/expki/ZeroLoop.git/middleware"
 	"github.com/expki/ZeroLoop.git/search"
 )
@@ -62,6 +63,13 @@ func main() {
 
 	// Initialize file manager
 	fm := filemanager.New(cfg.ProjectsDir)
+	fm.Resolver = func(projectID string) string {
+		var p models.Project
+		if err := database.Get().Select("name").First(&p, "id = ?", projectID).Error; err == nil {
+			return p.Name
+		}
+		return ""
+	}
 	logger.Log.Infow("file manager initialized", "projects_dir", cfg.ProjectsDir)
 
 	// Initialize LLM client

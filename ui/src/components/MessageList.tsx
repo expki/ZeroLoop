@@ -1,5 +1,5 @@
 import { useRef, useEffect, useMemo, useState } from 'react'
-import { useChatStore } from '../stores/chatStore'
+import { useAgentStore } from '../stores/agentStore'
 import { useUIStore } from '../stores/uiStore'
 import ProcessGroup from './ProcessGroup'
 import type { Message } from '../types'
@@ -122,9 +122,9 @@ function StandaloneMessage({ message }: { message: Message }) {
 }
 
 function MessageList() {
-  const messages = useChatStore((s) => s.messages)
-  const loading = useChatStore((s) => s.loading)
-  const chatWidth = useUIStore((s) => s.chatWidth)
+  const messages = useAgentStore((s) => s.messages)
+  const loading = useAgentStore((s) => s.loading)
+  const agentWidth = useUIStore((s) => s.agentWidth)
   const detailMode = useUIStore((s) => s.detailMode)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -136,7 +136,7 @@ function MessageList() {
     }
   }, [messages])
 
-  const maxWidth = chatWidth === 'full' ? '100%' : chatWidth
+  const maxWidth = agentWidth === 'full' ? '100%' : agentWidth
 
   if (loading) {
     return (

@@ -13,9 +13,9 @@ import (
 	"github.com/expki/ZeroLoop.git/agent"
 )
 
-// sessionKey uniquely identifies a session (scoped per chat + session number)
+// sessionKey uniquely identifies a session (scoped per agent + session number)
 type sessionKey struct {
-	ChatID     string
+	AgentID    string
 	SessionNum int
 }
 
@@ -35,10 +35,10 @@ var globalSessions = &sessionStore{
 	sessions: make(map[sessionKey]*sessionState),
 }
 
-func (s *sessionStore) get(chatID string, num int, projectDir string) *sessionState {
+func (s *sessionStore) get(agentID string, num int, projectDir string) *sessionState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := sessionKey{ChatID: chatID, SessionNum: num}
+	key := sessionKey{AgentID: agentID, SessionNum: num}
 	state, ok := s.sessions[key]
 	if !ok {
 		cwd := projectDir
@@ -51,10 +51,10 @@ func (s *sessionStore) get(chatID string, num int, projectDir string) *sessionSt
 	return state
 }
 
-func (s *sessionStore) reset(chatID string, num int) {
+func (s *sessionStore) reset(agentID string, num int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.sessions, sessionKey{ChatID: chatID, SessionNum: num})
+	delete(s.sessions, sessionKey{AgentID: agentID, SessionNum: num})
 }
 
 type CodeExecutionTool struct{}
@@ -110,21 +110,21 @@ func (t *CodeExecutionTool) Execute(ctx context.Context, a *agent.Agent, args ma
 		shouldReset = r
 	}
 
-	// Scope sessions per chat to prevent cross-chat state leakage
-	chatID := ""
+	// Scope sessions per agent to prevent cross-agent state leakage
+	agentID := ""
 	if a != nil {
-		chatID = a.ChatID
+		agentID = a.AgentID
 	}
 
 	if shouldReset {
-		globalSessions.reset(chatID, sessionNum)
+		globalSessions.reset(agentID, sessionNum)
 	}
 
 	projectDir := ""
 	if a != nil {
 		projectDir = a.ProjectDir
 	}
-	state := globalSessions.get(chatID, sessionNum, projectDir)
+	state := globalSessions.get(agentID, sessionNum, projectDir)
 
 	execCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()

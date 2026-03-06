@@ -13,9 +13,9 @@ interface ProjectState {
 
   init: () => void
   loadProjects: () => Promise<void>
-  createProject: (name: string, description?: string) => Promise<void>
+  createProject: (name: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
-  updateProject: (id: string, data: { name?: string; description?: string }) => Promise<void>
+  updateProject: (id: string, data: { name?: string }) => Promise<void>
   selectProject: (id: string | null) => void
   loadFiles: (projectId: string) => Promise<void>
   setMainView: (view: MainView) => void
@@ -63,7 +63,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   selectedProjectId: null,
   files: [],
-  mainView: { type: 'chat' },
+  mainView: { type: 'agent' },
   initialized: false,
 
   init: () => {
@@ -124,14 +124,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  createProject: async (name, description) => {
+  createProject: async (name) => {
     try {
-      const project = await api.createProject(name, description)
+      const project = await api.createProject(name)
       set((s) => ({
         projects: [project, ...s.projects],
         selectedProjectId: project.id,
         files: [],
-        mainView: { type: 'chat' },
+        mainView: { type: 'agent' },
       }))
     } catch (err) {
       console.error('Failed to create project:', err)
@@ -145,7 +145,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         projects: s.projects.filter((p) => p.id !== id),
         selectedProjectId: s.selectedProjectId === id ? null : s.selectedProjectId,
         files: s.selectedProjectId === id ? [] : s.files,
-        mainView: s.selectedProjectId === id ? { type: 'chat' } : s.mainView,
+        mainView: s.selectedProjectId === id ? { type: 'agent' } : s.mainView,
       }))
     } catch (err) {
       console.error('Failed to delete project:', err)
@@ -164,7 +164,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   selectProject: (id) => {
-    set({ selectedProjectId: id, files: [], mainView: { type: 'chat' } })
+    set({ selectedProjectId: id, files: [], mainView: { type: 'agent' } })
     if (id) {
       get().loadFiles(id)
     }

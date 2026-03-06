@@ -36,7 +36,7 @@ type LogCallback func(entry LogEntry)
 // Agent represents a single agent instance
 type Agent struct {
 	Number  int
-	ChatID  string // identifies which chat this agent belongs to (for session scoping)
+	AgentID string // identifies which agent session this agent belongs to
 	Profile string // agent profile name (default, developer, researcher, hacker)
 	History []llm.ChatMessage
 	Tools   *ToolRegistry
@@ -124,7 +124,7 @@ func New(llmClient *llm.Client, tools *ToolRegistry, onLog LogCallback) *Agent {
 func (a *Agent) NewSubordinate() *Agent {
 	sub := &Agent{
 		Number:            a.Number + 1,
-		ChatID:            a.ChatID,
+		AgentID:           a.AgentID,
 		Profile:           a.Profile,
 		History:           []llm.ChatMessage{},
 		Tools:             a.Tools,

@@ -57,8 +57,8 @@ export default function MonacoIDE() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [toggleQuickOpen, toggleSearchPanel, closeTab, layout])
 
-  const handleBackToChat = useCallback(() => {
-    setMainView({ type: 'chat' })
+  const handleBackToAgent = useCallback(() => {
+    setMainView({ type: 'agent' })
   }, [setMainView])
 
   if (!selectedProjectId) return null
@@ -66,7 +66,7 @@ export default function MonacoIDE() {
   return (
     <div className="monaco-ide">
       <div className="monaco-ide-toolbar">
-        <button className="icon-button" onClick={handleBackToChat} title="Back to chat">
+        <button className="icon-button" onClick={handleBackToAgent} title="Back to agent">
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
         <Breadcrumbs filePath={activeFile} />

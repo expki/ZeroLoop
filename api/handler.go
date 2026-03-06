@@ -23,7 +23,9 @@ func RegisterRoutes(mux *http.ServeMux, hub *Hub, fm *filemanager.FileManager) {
 		createProject(w, r, fm)
 	})
 	mux.HandleFunc("GET /api/projects/{id}", getProject)
-	mux.HandleFunc("PATCH /api/projects/{id}", updateProject)
+	mux.HandleFunc("PATCH /api/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
+		updateProject(w, r, fm)
+	})
 	mux.HandleFunc("DELETE /api/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
 		deleteProject(w, r, hub, fm)
 	})
@@ -54,19 +56,27 @@ func RegisterRoutes(mux *http.ServeMux, hub *Hub, fm *filemanager.FileManager) {
 		searchProjectFiles(w, r, fm)
 	})
 
-	// Chat routes
-	mux.HandleFunc("GET /api/chats", listChats)
-	mux.HandleFunc("POST /api/chats", createChat)
-	mux.HandleFunc("GET /api/chats/{id}", getChat)
-	mux.HandleFunc("DELETE /api/chats/{id}", func(w http.ResponseWriter, r *http.Request) {
-		deleteChat(w, r, hub)
+	// Agent routes
+	mux.HandleFunc("GET /api/agents", listAgents)
+	mux.HandleFunc("POST /api/agents", createAgent)
+	mux.HandleFunc("GET /api/agents/{id}", getAgent)
+	mux.HandleFunc("DELETE /api/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
+		deleteAgent(w, r, hub)
 	})
-	mux.HandleFunc("PATCH /api/chats/{id}", renameChat)
-	mux.HandleFunc("GET /api/chats/{id}/messages", getChatMessages)
-	mux.HandleFunc("POST /api/chats/{id}/export", exportChat)
-	mux.HandleFunc("POST /api/chats/{id}/branch", func(w http.ResponseWriter, r *http.Request) {
-		branchChat(w, r)
+	mux.HandleFunc("PATCH /api/agents/{id}", renameAgent)
+	mux.HandleFunc("GET /api/agents/{id}/messages", getAgentMessages)
+	mux.HandleFunc("POST /api/agents/{id}/export", exportAgent)
+	mux.HandleFunc("POST /api/agents/{id}/branch", func(w http.ResponseWriter, r *http.Request) {
+		branchAgent(w, r)
 	})
+	// Terminal routes
+	mux.HandleFunc("GET /api/terminals", listTerminals)
+	mux.HandleFunc("POST /api/terminals", createTerminal)
+	mux.HandleFunc("DELETE /api/terminals/{id}", func(w http.ResponseWriter, r *http.Request) {
+		deleteTerminal(w, r, hub)
+	})
+	mux.HandleFunc("PATCH /api/terminals/{id}", renameTerminal)
+
 	mux.HandleFunc("GET /api/health/llm", func(w http.ResponseWriter, r *http.Request) {
 		llmHealth(w, r, hub)
 	})
@@ -88,22 +98,22 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-func listChats(w http.ResponseWriter, r *http.Request) {
-	var chats []models.Chat
+func listAgents(w http.ResponseWriter, r *http.Request) {
+	var agents []models.Agent
 	db := database.Get()
 	query := db.Order("updated_at DESC")
 	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
 		query = query.Where("project_id = ?", projectID)
 	}
-	result := query.Find(&chats)
+	result := query.Find(&agents)
 	if result.Error != nil {
-		writeError(w, http.StatusInternalServerError, "failed to fetch chats")
+		writeError(w, http.StatusInternalServerError, "failed to fetch agents")
 		return
 	}
-	writeJSON(w, http.StatusOK, chats)
+	writeJSON(w, http.StatusOK, agents)
 }
 
-func createChat(w http.ResponseWriter, r *http.Request) {
+func createAgent(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name      string `json:"name"`
 		ProjectID string `json:"project_id"`
@@ -122,37 +132,37 @@ func createChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name == "" {
-		req.Name = "New Chat"
+		req.Name = "New Agent"
 	}
 
-	chat := models.Chat{
+	agt := models.Agent{
 		ID:        uuid.New().String(),
 		ProjectID: req.ProjectID,
 		Name:      req.Name,
 	}
-	if err := database.Get().Create(&chat).Error; err != nil {
-		logger.Log.Errorw("failed to create chat", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create chat")
+	if err := database.Get().Create(&agt).Error; err != nil {
+		logger.Log.Errorw("failed to create agent", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create agent")
 		return
 	}
-	writeJSON(w, http.StatusCreated, chat)
+	writeJSON(w, http.StatusCreated, agt)
 }
 
-func getChat(w http.ResponseWriter, r *http.Request) {
+func getAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var chat models.Chat
-	if err := database.Get().First(&chat, "id = ?", id).Error; err != nil {
-		writeError(w, http.StatusNotFound, "chat not found")
+	var agt models.Agent
+	if err := database.Get().First(&agt, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, chat)
+	writeJSON(w, http.StatusOK, agt)
 }
 
-func deleteChat(w http.ResponseWriter, r *http.Request, hub *Hub) {
+func deleteAgent(w http.ResponseWriter, r *http.Request, hub *Hub) {
 	id := r.PathValue("id")
 
 	// Clean up in-memory agent/counter state without broadcasting
-	hub.cleanupChat(id)
+	hub.cleanupAgent(id)
 
 	// Clean up search index
 	db := database.Get()
@@ -162,14 +172,14 @@ func deleteChat(w http.ResponseWriter, r *http.Request, hub *Hub) {
 		_ = search.Delete(m.ID)
 	}
 
-	if err := db.Delete(&models.Chat{}, "id = ?", id).Error; err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete chat")
+	if err := db.Delete(&models.Agent{}, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete agent")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func renameChat(w http.ResponseWriter, r *http.Request) {
+func renameAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
 		Name string `json:"name"`
@@ -180,22 +190,22 @@ func renameChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db := database.Get()
-	result := db.Model(&models.Chat{}).Where("id = ?", id).Update("name", req.Name)
+	result := db.Model(&models.Agent{}).Where("id = ?", id).Update("name", req.Name)
 	if result.Error != nil {
-		writeError(w, http.StatusInternalServerError, "failed to rename chat")
+		writeError(w, http.StatusInternalServerError, "failed to rename agent")
 		return
 	}
 	if result.RowsAffected == 0 {
-		writeError(w, http.StatusNotFound, "chat not found")
+		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	var chat models.Chat
-	db.First(&chat, "id = ?", id)
-	writeJSON(w, http.StatusOK, chat)
+	var agt models.Agent
+	db.First(&agt, "id = ?", id)
+	writeJSON(w, http.StatusOK, agt)
 }
 
-func getChatMessages(w http.ResponseWriter, r *http.Request) {
+func getAgentMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var messages []models.Message
 	result := database.Get().Where("chat_id = ?", id).Order("no ASC").Find(&messages)
@@ -206,13 +216,13 @@ func getChatMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, messages)
 }
 
-func exportChat(w http.ResponseWriter, r *http.Request) {
+func exportAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	db := database.Get()
 
-	var chat models.Chat
-	if err := db.First(&chat, "id = ?", id).Error; err != nil {
-		writeError(w, http.StatusNotFound, "chat not found")
+	var agt models.Agent
+	if err := db.First(&agt, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
@@ -220,13 +230,13 @@ func exportChat(w http.ResponseWriter, r *http.Request) {
 	db.Where("chat_id = ?", id).Order("no ASC").Find(&messages)
 
 	export := map[string]any{
-		"chat":     chat,
+		"agent":    agt,
 		"messages": messages,
 	}
 	writeJSON(w, http.StatusOK, export)
 }
 
-func branchChat(w http.ResponseWriter, r *http.Request) {
+func branchAgent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var req struct {
@@ -238,21 +248,21 @@ func branchChat(w http.ResponseWriter, r *http.Request) {
 
 	db := database.Get()
 
-	// Get original chat
-	var originalChat models.Chat
-	if err := db.First(&originalChat, "id = ?", id).Error; err != nil {
-		writeError(w, http.StatusNotFound, "chat not found")
+	// Get original agent
+	var originalAgt models.Agent
+	if err := db.First(&originalAgt, "id = ?", id).Error; err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
 
-	// Create new branched chat
-	newChat := models.Chat{
+	// Create new branched agent
+	newAgt := models.Agent{
 		ID:        uuid.New().String(),
-		ProjectID: originalChat.ProjectID,
-		Name:      originalChat.Name + " (branch)",
+		ProjectID: originalAgt.ProjectID,
+		Name:      originalAgt.Name + " (branch)",
 	}
-	if err := db.Create(&newChat).Error; err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create branched chat")
+	if err := db.Create(&newAgt).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create branched agent")
 		return
 	}
 
@@ -267,7 +277,7 @@ func branchChat(w http.ResponseWriter, r *http.Request) {
 	for i, msg := range messages {
 		newMsg := models.Message{
 			ID:      uuid.New().String(),
-			ChatID:  newChat.ID,
+			AgentID: newAgt.ID,
 			No:      i + 1,
 			Type:    msg.Type,
 			Heading: msg.Heading,
@@ -281,7 +291,7 @@ func branchChat(w http.ResponseWriter, r *http.Request) {
 		if msg.Content != "" {
 			_ = search.Index(search.Document{
 				ID:      newMsg.ID,
-				ChatID:  newChat.ID,
+				AgentID: newAgt.ID,
 				Content: msg.Content,
 				Type:    string(msg.Type),
 				Heading: msg.Heading,
@@ -289,7 +299,7 @@ func branchChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusCreated, newChat)
+	writeJSON(w, http.StatusCreated, newAgt)
 }
 
 func llmHealth(w http.ResponseWriter, r *http.Request, hub *Hub) {

@@ -1,4 +1,4 @@
-import type { Chat, Message, Project, ProjectFile } from '../types'
+import type { Agent, Message, Project, ProjectFile, Terminal } from '../types'
 
 const API_BASE = '/api'
 
@@ -19,15 +19,15 @@ export const api = {
   // Project endpoints
   listProjects: () => request<Project[]>('/projects'),
 
-  createProject: (name: string, description?: string) =>
+  createProject: (name: string) =>
     request<Project>('/projects', {
       method: 'POST',
-      body: JSON.stringify({ name, description: description || '' }),
+      body: JSON.stringify({ name }),
     }),
 
   getProject: (id: string) => request<Project>(`/projects/${id}`),
 
-  updateProject: (id: string, data: { name?: string; description?: string }) =>
+  updateProject: (id: string, data: { name?: string }) =>
     request<Project>(`/projects/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -86,38 +86,57 @@ export const api = {
     return res.json()
   },
 
-  // Chat endpoints (project-scoped)
-  listChats: (projectId?: string) =>
-    request<Chat[]>(projectId ? `/chats?project_id=${projectId}` : '/chats'),
+  // Agent endpoints (project-scoped)
+  listAgents: (projectId?: string) =>
+    request<Agent[]>(projectId ? `/agents?project_id=${projectId}` : '/agents'),
 
-  createChat: (projectId: string, name?: string) =>
-    request<Chat>('/chats', {
+  createAgent: (projectId: string, name?: string) =>
+    request<Agent>('/agents', {
       method: 'POST',
-      body: JSON.stringify({ name: name || 'New Chat', project_id: projectId }),
+      body: JSON.stringify({ name: name || 'New Agent', project_id: projectId }),
     }),
 
-  getChat: (id: string) => request<Chat>(`/chats/${id}`),
+  getAgent: (id: string) => request<Agent>(`/agents/${id}`),
 
-  deleteChat: (id: string) =>
-    request<void>(`/chats/${id}`, { method: 'DELETE' }),
+  deleteAgent: (id: string) =>
+    request<void>(`/agents/${id}`, { method: 'DELETE' }),
 
-  getChatMessages: (id: string) => request<Message[]>(`/chats/${id}/messages`),
+  getAgentMessages: (id: string) => request<Message[]>(`/agents/${id}/messages`),
 
-  renameChat: (id: string, name: string) =>
-    request<Chat>(`/chats/${id}`, {
+  renameAgent: (id: string, name: string) =>
+    request<Agent>(`/agents/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({ name }),
     }),
 
-  exportChat: (id: string) =>
-    request<{ chat: Chat; messages: Message[] }>(`/chats/${id}/export`, {
+  exportAgent: (id: string) =>
+    request<{ agent: Agent; messages: Message[] }>(`/agents/${id}/export`, {
       method: 'POST',
     }),
 
-  branchChat: (id: string, messageNo?: number) =>
-    request<Chat>(`/chats/${id}/branch`, {
+  branchAgent: (id: string, messageNo?: number) =>
+    request<Agent>(`/agents/${id}/branch`, {
       method: 'POST',
       body: JSON.stringify({ message_no: messageNo || 0 }),
+    }),
+
+  // Terminal endpoints (project-scoped)
+  listTerminals: (projectId?: string) =>
+    request<Terminal[]>(projectId ? `/terminals?project_id=${projectId}` : '/terminals'),
+
+  createTerminal: (projectId: string, name?: string) =>
+    request<Terminal>('/terminals', {
+      method: 'POST',
+      body: JSON.stringify({ name: name || 'Terminal', project_id: projectId }),
+    }),
+
+  deleteTerminal: (id: string) =>
+    request<void>(`/terminals/${id}`, { method: 'DELETE' }),
+
+  renameTerminal: (id: string, name: string) =>
+    request<Terminal>(`/terminals/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
     }),
 
   searchProjectFiles: (projectId: string, query: string, max?: number) =>

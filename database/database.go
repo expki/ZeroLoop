@@ -93,8 +93,9 @@ func AutoMigrate() error {
 	err := DB.AutoMigrate(
 		&models.Project{},
 		&models.ProjectFile{},
-		&models.Chat{},
+		&models.Agent{},
 		&models.Message{},
+		&models.Terminal{},
 	)
 	if err != nil {
 		return err

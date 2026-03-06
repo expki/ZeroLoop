@@ -1,17 +1,17 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Theme, DetailMode, ChatWidth, ConnectionStatus } from '../types'
+import type { Theme, DetailMode, AgentWidth, ConnectionStatus } from '../types'
 
 interface UIState {
   theme: Theme
   sidebarOpen: boolean
-  chatWidth: ChatWidth
+  agentWidth: AgentWidth
   detailMode: DetailMode
   connectionStatus: ConnectionStatus
   toggleTheme: () => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
-  setChatWidth: (w: ChatWidth) => void
+  setAgentWidth: (w: AgentWidth) => void
   setDetailMode: (m: DetailMode) => void
 }
 
@@ -20,7 +20,7 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       theme: 'dark',
       sidebarOpen: true,
-      chatWidth: '55em',
+      agentWidth: '55em',
       detailMode: 'current',
       connectionStatus: 'connected',
 
@@ -31,14 +31,14 @@ export const useUIStore = create<UIState>()(
         set((state) => ({ sidebarOpen: !state.sidebarOpen })),
 
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
-      setChatWidth: (chatWidth) => set({ chatWidth }),
+      setAgentWidth: (agentWidth) => set({ agentWidth }),
       setDetailMode: (detailMode) => set({ detailMode }),
     }),
     {
       name: 'zeroloop-ui-preferences',
       partialize: (state) => ({
         theme: state.theme,
-        chatWidth: state.chatWidth,
+        agentWidth: state.agentWidth,
         detailMode: state.detailMode,
       }),
     }

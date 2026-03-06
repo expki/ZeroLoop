@@ -1,20 +1,20 @@
 import { useState, useRef, useCallback } from 'react'
-import { useChatStore } from '../stores/chatStore'
-import './ChatInput.css'
+import { useAgentStore } from '../stores/agentStore'
+import './AgentInput.css'
 
-function ChatInput() {
+function AgentInput() {
   const [input, setInput] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const sendMessage = useChatStore((s) => s.sendMessage)
-  const paused = useChatStore((s) => s.paused)
-  const queueSize = useChatStore((s) => s.queueSize)
-  const togglePause = useChatStore((s) => s.togglePause)
-  const cancelChat = useChatStore((s) => s.cancelChat)
-  const clearChat = useChatStore((s) => s.clearChat)
-  const exportChat = useChatStore((s) => s.exportChat)
-  const isRunning = useChatStore((s) => {
-    const chat = s.chats.find((c) => c.id === s.selectedChatId)
-    return chat?.running ?? false
+  const sendMessage = useAgentStore((s) => s.sendMessage)
+  const paused = useAgentStore((s) => s.paused)
+  const queueSize = useAgentStore((s) => s.queueSize)
+  const togglePause = useAgentStore((s) => s.togglePause)
+  const cancelAgent = useAgentStore((s) => s.cancelAgent)
+  const clearAgent = useAgentStore((s) => s.clearAgent)
+  const exportAgent = useAgentStore((s) => s.exportAgent)
+  const isRunning = useAgentStore((s) => {
+    const agent = s.agents.find((a) => a.id === s.selectedAgentId)
+    return agent?.running ?? false
   })
 
   const handleSend = useCallback(() => {
@@ -41,11 +41,11 @@ function ChatInput() {
   }
 
   return (
-    <div className="chat-input-section">
-      <div className="chat-input-container">
+    <div className="agent-input-section">
+      <div className="agent-input-container">
         <textarea
           ref={textareaRef}
-          className="chat-textarea"
+          className="agent-textarea"
           placeholder="Type a message..."
           value={input}
           onChange={handleInput}
@@ -74,7 +74,7 @@ function ChatInput() {
         </button>
         <button
           className="action-btn action-btn-cancel"
-          onClick={cancelChat}
+          onClick={cancelAgent}
           disabled={!isRunning && !paused}
         >
           <span className="material-symbols-outlined">cancel</span>
@@ -86,11 +86,11 @@ function ChatInput() {
             <span className="queue-count">{queueSize}</span>
           </span>
         )}
-        <button className="action-btn" onClick={clearChat}>
+        <button className="action-btn" onClick={clearAgent}>
           <span className="material-symbols-outlined">delete_sweep</span>
           <span className="action-label">Clear</span>
         </button>
-        <button className="action-btn" onClick={exportChat}>
+        <button className="action-btn" onClick={exportAgent}>
           <span className="material-symbols-outlined">download</span>
           <span className="action-label">Export</span>
         </button>
@@ -99,4 +99,4 @@ function ChatInput() {
   )
 }
 
-export default ChatInput
+export default AgentInput

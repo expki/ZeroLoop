@@ -39,7 +39,7 @@ func Init() error {
 // Document represents a searchable document
 type Document struct {
 	ID        string    `json:"id"`
-	ChatID    string    `json:"chat_id"`
+	AgentID   string    `json:"agent_id"`
 	Content   string    `json:"content"`
 	Type      string    `json:"type"` // "message", "memory", "knowledge"
 	Heading   string    `json:"heading"`
@@ -53,7 +53,7 @@ type SearchResult struct {
 	Content string  `json:"content"`
 	Type    string  `json:"type"`
 	Heading string  `json:"heading"`
-	ChatID  string  `json:"chat_id"`
+	AgentID string  `json:"agent_id"`
 }
 
 // Index adds or updates a document in the search index
@@ -74,7 +74,7 @@ func Search(query string, maxResults int) ([]SearchResult, error) {
 	}
 
 	searchReq := bleve.NewSearchRequestOptions(bleve.NewQueryStringQuery(query), maxResults, 0, false)
-	searchReq.Fields = []string{"content", "type", "heading", "chat_id"}
+	searchReq.Fields = []string{"content", "type", "heading", "agent_id"}
 
 	searchResults, err := idx.Search(searchReq)
 	if err != nil {
@@ -96,8 +96,8 @@ func Search(query string, maxResults int) ([]SearchResult, error) {
 		if v, ok := hit.Fields["heading"].(string); ok {
 			r.Heading = v
 		}
-		if v, ok := hit.Fields["chat_id"].(string); ok {
-			r.ChatID = v
+		if v, ok := hit.Fields["agent_id"].(string); ok {
+			r.AgentID = v
 		}
 		results = append(results, r)
 	}

@@ -6,7 +6,7 @@ describe('uiStore', () => {
     useUIStore.setState({
       theme: 'dark',
       sidebarOpen: true,
-      chatWidth: '55em',
+      agentWidth: '55em',
       detailMode: 'current',
       connectionStatus: 'connected',
     })
@@ -26,9 +26,9 @@ describe('uiStore', () => {
     expect(useUIStore.getState().sidebarOpen).toBe(true)
   })
 
-  it('sets chat width', () => {
-    useUIStore.getState().setChatWidth('80em')
-    expect(useUIStore.getState().chatWidth).toBe('80em')
+  it('sets agent width', () => {
+    useUIStore.getState().setAgentWidth('80em')
+    expect(useUIStore.getState().agentWidth).toBe('80em')
   })
 
   it('sets detail mode', () => {

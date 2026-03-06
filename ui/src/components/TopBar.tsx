@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useUIStore } from '../stores/uiStore'
-import { useChatStore } from '../stores/chatStore'
+import { useAgentStore } from '../stores/agentStore'
 import './TopBar.css'
 
 function TopBar() {
   const { sidebarOpen, toggleSidebar, connectionStatus } = useUIStore()
-  const selectChat = useChatStore((s) => s.selectChat)
-  const selectedChatId = useChatStore((s) => s.selectedChatId)
-  const chats = useChatStore((s) => s.chats)
+  const selectAgent = useAgentStore((s) => s.selectAgent)
+  const selectedAgentId = useAgentStore((s) => s.selectedAgentId)
+  const agents = useAgentStore((s) => s.agents)
   const [time, setTime] = useState(new Date())
 
   useEffect(() => {
@@ -15,7 +15,7 @@ function TopBar() {
     return () => clearInterval(interval)
   }, [])
 
-  const currentChat = chats.find((c) => c.id === selectedChatId)
+  const currentAgent = agents.find((a) => a.id === selectedAgentId)
   const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const dateStr = time.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
 
@@ -33,11 +33,11 @@ function TopBar() {
             <span className="material-symbols-outlined">menu</span>
           </button>
         )}
-        <button className="icon-button" onClick={() => selectChat(null)} title="Home">
+        <button className="icon-button" onClick={() => selectAgent(null)} title="Home">
           <span className="material-symbols-outlined">home</span>
         </button>
-        {currentChat && (
-          <span className="topbar-chat-name">{currentChat.name}</span>
+        {currentAgent && (
+          <span className="topbar-agent-name">{currentAgent.name}</span>
         )}
       </div>
       <div className="topbar-right">
