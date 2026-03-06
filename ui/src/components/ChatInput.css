@@ -99,8 +99,40 @@
   background: var(--color-bg-hover);
 }
 
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.action-btn:disabled:hover {
+  color: var(--color-text-tertiary);
+  background: none;
+}
+
+.action-btn-cancel:not(:disabled):hover {
+  color: var(--color-error);
+}
+
 .action-btn .material-symbols-outlined {
   font-size: 16px;
+}
+
+.queue-indicator {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--spacing-xxs) var(--spacing-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.queue-indicator .material-symbols-outlined {
+  font-size: 14px;
+}
+
+.queue-count {
+  font-family: var(--font-mono);
+  font-weight: 600;
 }
 
 @media (max-width: 640px) {

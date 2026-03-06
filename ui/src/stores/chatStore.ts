@@ -9,6 +9,7 @@ interface ChatState {
   messages: Message[]
   loading: boolean
   paused: boolean
+  queueSize: number
   initialized: boolean
   selectChat: (id: string | null) => void
   createChat: (projectId: string) => void
@@ -18,6 +19,7 @@ interface ChatState {
   intervene: (content: string) => void
   branchChat: (messageNo?: number) => void
   togglePause: () => void
+  cancelChat: () => void
   clearChat: () => void
   exportChat: () => void
   loadChatsForProject: (projectId: string) => Promise<void>
@@ -43,6 +45,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   loading: false,
   paused: false,
+  queueSize: 0,
   initialized: false,
 
   init: () => {
@@ -95,18 +98,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
       })
     })
 
-    // Handle chat updates (running state, name changes)
-    ws.on('chat_update', (payload: { id: string; running?: boolean; name?: string }) => {
-      set((s) => ({
-        chats: s.chats.map((c) => {
-          if (c.id !== payload.id) return c
-          const updated = { ...c }
-          if (payload.running !== undefined) updated.running = payload.running
-          if (payload.name !== undefined) updated.name = payload.name
-          return updated
-        }),
-        paused: payload.id === s.selectedChatId && payload.running === false ? false : s.paused,
-      }))
+    // Handle chat updates (running state, name changes, paused state)
+    ws.on('chat_update', (payload: { id: string; running?: boolean; name?: string; paused?: boolean; queue_size?: number }) => {
+      set((s) => {
+        const newState: Partial<ChatState> = {
+          chats: s.chats.map((c) => {
+            if (c.id !== payload.id) return c
+            const updated = { ...c }
+            if (payload.running !== undefined) updated.running = payload.running
+            if (payload.name !== undefined) updated.name = payload.name
+            return updated
+          }),
+        }
+        if (payload.id === s.selectedChatId) {
+          if (payload.paused !== undefined) {
+            newState.paused = payload.paused
+          }
+          if (payload.queue_size !== undefined) {
+            newState.queueSize = payload.queue_size
+          }
+        }
+        return newState
+      })
     })
 
     // Handle clear
@@ -207,6 +220,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       chat_id: selectedChatId,
       content: content.trim(),
     })
+    // Clear paused state — sending a new message supersedes any pause
+    set({ paused: false, queueSize: 0 })
   },
 
   intervene: (content) => {
@@ -247,10 +262,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { selectedChatId, paused } = get()
     if (!selectedChatId) return
 
-    if (!paused) {
+    if (paused) {
+      // Resume: send resume event to backend
+      ws.send('resume', { chat_id: selectedChatId })
+    } else {
+      // Pause: send pause event to backend
       ws.send('pause', { chat_id: selectedChatId })
     }
-    set({ paused: !paused })
+    // State will be confirmed by chat_update from backend
+  },
+
+  cancelChat: () => {
+    const { selectedChatId } = get()
+    if (!selectedChatId) return
+    ws.send('cancel', { chat_id: selectedChatId })
   },
 
   clearChat: () => {

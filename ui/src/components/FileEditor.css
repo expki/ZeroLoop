@@ -71,3 +71,11 @@
   color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
 }
+
+.cm-ghost-text {
+  opacity: 0.4;
+  font-style: italic;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -3,13 +3,22 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/expki/ZeroLoop.git/llm"
 	"github.com/expki/ZeroLoop.git/logger"
 )
+
+// ErrPaused is returned when the agent loop is interrupted by a user pause.
+var ErrPaused = errors.New("agent paused")
+
+// ErrCancelled is returned when the agent loop is interrupted by a user cancel.
+var ErrCancelled = errors.New("agent cancelled")
 
 // LogEntry represents a log item sent to the UI
 type LogEntry struct {
@@ -48,7 +57,53 @@ type Agent struct {
 	// Secrets to mask in output
 	Secrets map[string]string // name -> value
 
+	// Pause state (atomic)
+	paused    int32
+	cancelled int32
+
+	// Tool context cancellation (separate from main context so pause doesn't kill tools)
+	toolCancelMu sync.Mutex
+	toolCancel   context.CancelFunc
+
 	mu sync.Mutex
+}
+
+// SetPaused sets the agent's paused flag atomically.
+func (a *Agent) SetPaused(p bool) {
+	if p {
+		atomic.StoreInt32(&a.paused, 1)
+	} else {
+		atomic.StoreInt32(&a.paused, 0)
+	}
+}
+
+// IsPaused returns whether the agent is currently paused.
+func (a *Agent) IsPaused() bool {
+	return atomic.LoadInt32(&a.paused) == 1
+}
+
+// SetCancelled sets the agent's cancelled flag atomically.
+func (a *Agent) SetCancelled(c bool) {
+	if c {
+		atomic.StoreInt32(&a.cancelled, 1)
+	} else {
+		atomic.StoreInt32(&a.cancelled, 0)
+	}
+}
+
+// IsCancelled returns whether the agent is currently cancelled.
+func (a *Agent) IsCancelled() bool {
+	return atomic.LoadInt32(&a.cancelled) == 1
+}
+
+// CancelTools cancels any in-progress tool execution context.
+// Used by cancel/clear to stop tools immediately. Pause does NOT call this.
+func (a *Agent) CancelTools() {
+	a.toolCancelMu.Lock()
+	if a.toolCancel != nil {
+		a.toolCancel()
+	}
+	a.toolCancelMu.Unlock()
 }
 
 // New creates a new root agent
@@ -148,26 +203,17 @@ func (a *Agent) compressHistory(ctx context.Context) {
 		}
 	}
 
-	req := &llm.ChatCompletionRequest{
-		Messages: []llm.ChatMessage{
-			{Role: "system", Content: "You summarize conversation histories concisely. Output ONLY the summary."},
-			{Role: "user", Content: sb.String()},
-		},
-	}
-
-	resp, err := a.LLM.ChatCompletion(ctx, req)
+	result, err := a.LLM.ChatCompletion(ctx, []llm.ChatMessage{
+		{Role: "system", Content: "You summarize conversation histories concisely. Output ONLY the summary."},
+		{Role: "user", Content: sb.String()},
+	}, nil, nil)
 	if err != nil {
 		// Fallback to simple pruning
 		a.pruneHistory()
 		return
 	}
 
-	summary := ""
-	if len(resp.Choices) > 0 {
-		if s, ok := resp.Choices[0].Message.Content.(string); ok {
-			summary = s
-		}
-	}
+	summary := result.Content
 	if summary == "" {
 		a.pruneHistory()
 		return
@@ -225,6 +271,21 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 		Content: userMessage,
 	})
 
+	return a.runLoop(ctx)
+}
+
+// Continue re-enters the agent loop without adding a new user message.
+// Used after a pause to resume processing from the current history state.
+func (a *Agent) Continue(ctx context.Context) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.SetPaused(false)
+	return a.runLoop(ctx)
+}
+
+// runLoop is the core agent loop: think → execute → observe → repeat.
+func (a *Agent) runLoop(ctx context.Context) (string, error) {
 	// Build system prompt (profile-aware)
 	systemPrompt := SystemPromptWithProfile(a.Number, a.Profile, a.ProjectDir, a.Tools.All())
 
@@ -239,6 +300,12 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 	for i := 0; i < maxIterations; i++ {
 		select {
 		case <-ctx.Done():
+			if a.IsCancelled() {
+				return "", ErrCancelled
+			}
+			if a.IsPaused() {
+				return "", ErrPaused
+			}
 			return "", ctx.Err()
 		default:
 		}
@@ -271,13 +338,6 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 		})
 		messages = append(messages, a.History...)
 
-		// Call LLM with streaming
-		req := &llm.ChatCompletionRequest{
-			Messages: messages,
-			Tools:    a.Tools.ToLLMTools(),
-			Stream:   true,
-		}
-
 		// Log that we're thinking (only on subsequent iterations)
 		if i > 0 {
 			a.Log(LogEntry{
@@ -288,63 +348,42 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 			})
 		}
 
-		// Collect streaming response
-		var contentBuilder strings.Builder
-		var toolCalls []llm.ToolCall
-		var finishReason string
+		// Call LLM with streaming via /v1/chat/completions
 		firstChunk := true
-
-		err := a.LLM.ChatCompletionStream(ctx, req, func(chunk llm.ChatCompletionChunk) error {
-			if len(chunk.Choices) == 0 {
-				return nil
-			}
-			choice := chunk.Choices[0]
-
-			// Accumulate content
-			if choice.Delta.Content != nil {
-				maskedContent := a.maskSecrets(*choice.Delta.Content)
-				contentBuilder.WriteString(*choice.Delta.Content)
-				// Stream content to UI (masked)
-				a.Log(LogEntry{
-					Type:    "agent",
-					Heading: "Thinking",
-					Content: maskedContent,
-					AgentNo: a.Number,
-					Stream:  !firstChunk,
-				})
-				firstChunk = false
-			}
-
-			// Accumulate tool calls (match by index for correct multi-tool-call streaming)
-			if len(choice.Delta.ToolCalls) > 0 {
-				for _, tc := range choice.Delta.ToolCalls {
-					found := false
-					for j := range toolCalls {
-						if toolCalls[j].Index == tc.Index {
-							toolCalls[j].Function.Arguments += tc.Function.Arguments
-							if tc.Function.Name != "" {
-								toolCalls[j].Function.Name = tc.Function.Name
-							}
-							if tc.ID != "" {
-								toolCalls[j].ID = tc.ID
-							}
-							found = true
-							break
-						}
-					}
-					if !found {
-						toolCalls = append(toolCalls, tc)
-					}
-				}
-			}
-
-			if choice.FinishReason != nil {
-				finishReason = *choice.FinishReason
-			}
+		var streamAccum strings.Builder
+		result, err := a.LLM.ChatCompletionStream(ctx, messages, a.Tools.ToLLMTools(), nil, func(text string) error {
+			streamAccum.WriteString(text)
+			maskedContent := a.maskSecrets(text)
+			a.Log(LogEntry{
+				Type:    "agent",
+				Heading: "Thinking",
+				Content: maskedContent,
+				AgentNo: a.Number,
+				Stream:  !firstChunk,
+			})
+			firstChunk = false
 			return nil
 		})
 
 		if err != nil {
+			// If cancelled or paused, return quietly without logging errors
+			if a.IsCancelled() {
+				return "", ErrCancelled
+			}
+			if a.IsPaused() {
+				// Save partial response to history so resume can continue
+				if partial := streamAccum.String(); partial != "" {
+					a.History = append(a.History, llm.ChatMessage{
+						Role:    "assistant",
+						Content: partial,
+					})
+					a.History = append(a.History, llm.ChatMessage{
+						Role:    "user",
+						Content: "[SYSTEM: Your previous response was interrupted. Continue from exactly where you left off. Do not repeat what you already said.]",
+					})
+				}
+				return "", ErrPaused
+			}
 			a.Log(LogEntry{
 				Type:    "error",
 				Heading: "LLM Error",
@@ -354,9 +393,8 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 			return "", fmt.Errorf("llm stream error: %w", err)
 		}
 
-		_ = finishReason
-
-		responseContent := contentBuilder.String()
+		responseContent := result.Content
+		toolCalls := result.ToolCalls
 
 		// Repeat detection
 		if responseContent != "" && responseContent == lastResponse {
@@ -433,7 +471,41 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 			breakLoop := false
 			var finalResponse string
 
-			for _, tc := range toolCalls {
+			// Create a separate tool context NOT tied to the main ctx.
+			// Pause cancels main ctx (to stop LLM streaming) but tools should finish.
+			// Cancel/Clear calls CancelTools() to stop this context too.
+			toolCtx, toolCancelFn := context.WithTimeout(context.Background(), 5*time.Minute)
+			a.toolCancelMu.Lock()
+			a.toolCancel = toolCancelFn
+			a.toolCancelMu.Unlock()
+
+			for tcIdx, tc := range toolCalls {
+				// Check for cancel between tool calls (cancel stops tools, pause does not)
+				if a.IsCancelled() {
+					for _, remaining := range toolCalls[tcIdx:] {
+						a.History = append(a.History, llm.ChatMessage{
+							Role:       "tool",
+							Content:    "[Tool execution cancelled by user]",
+							ToolCallID: remaining.ID,
+						})
+					}
+					toolCancelFn()
+					return "", ErrCancelled
+				}
+
+				// Check for pause between tool calls (let current tool complete, stop before next)
+				if a.IsPaused() {
+					for _, remaining := range toolCalls[tcIdx:] {
+						a.History = append(a.History, llm.ChatMessage{
+							Role:       "tool",
+							Content:    "[Tool execution paused by user — will retry on resume]",
+							ToolCallID: remaining.ID,
+						})
+					}
+					toolCancelFn()
+					return "", ErrPaused
+				}
+
 				// Check for intervention between tool calls
 				if intervention := a.checkIntervention(); intervention != "" {
 					a.Log(LogEntry{
@@ -486,9 +558,26 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 					AgentNo: a.Number,
 				})
 
-				// Execute tool
-				result, err := tool.Execute(ctx, a, args)
+				// Execute tool with separate context (not cancelled by pause)
+				result, err := tool.Execute(toolCtx, a, args)
 				if err != nil {
+					// Cancel interrupted the tool
+					if a.IsCancelled() {
+						a.History = append(a.History, llm.ChatMessage{
+							Role:       "tool",
+							Content:    "[Tool execution cancelled by user]",
+							ToolCallID: tc.ID,
+						})
+						for _, remaining := range toolCalls[tcIdx+1:] {
+							a.History = append(a.History, llm.ChatMessage{
+								Role:       "tool",
+								Content:    "[Tool execution cancelled by user]",
+								ToolCallID: remaining.ID,
+							})
+						}
+						toolCancelFn()
+						return "", ErrCancelled
+					}
 					errMsg := fmt.Sprintf("Tool error: %s", a.maskSecrets(err.Error()))
 					a.Log(LogEntry{
 						Type:    "error",
@@ -518,6 +607,17 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 					breakLoop = true
 					finalResponse = maskedMessage
 				}
+			}
+
+			// Clean up tool context
+			toolCancelFn()
+			a.toolCancelMu.Lock()
+			a.toolCancel = nil
+			a.toolCancelMu.Unlock()
+
+			// Check pause after all tools completed
+			if a.IsPaused() {
+				return "", ErrPaused
 			}
 
 			if breakLoop {

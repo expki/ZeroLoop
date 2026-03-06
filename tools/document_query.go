@@ -48,7 +48,7 @@ func (t *DocumentQueryTool) Parameters() any {
 func (t *DocumentQueryTool) Execute(ctx context.Context, a *agent.Agent, args map[string]any) (*agent.ToolResult, error) {
 	uri, _ := args["uri"].(string)
 	if uri == "" {
-		return nil, fmt.Errorf("uri is required")
+		return nil, fmt.Errorf(`uri is required. Example: {"uri": "path/to/file.txt"}`)
 	}
 
 	mode, _ := args["mode"].(string)
@@ -79,7 +79,7 @@ func (t *DocumentQueryTool) Execute(ctx context.Context, a *agent.Agent, args ma
 	// Query mode: use LLM to answer questions about the document
 	question, _ := args["question"].(string)
 	if question == "" {
-		return nil, fmt.Errorf("question is required for query mode")
+		return nil, fmt.Errorf(`question is required for query mode. Example: {"uri": "file.txt", "mode": "query", "question": "your question"}`)
 	}
 
 	// Truncate content for LLM context
@@ -87,20 +87,16 @@ func (t *DocumentQueryTool) Execute(ctx context.Context, a *agent.Agent, args ma
 		content = content[:10000] + "\n... (truncated)"
 	}
 
-	req := &llm.ChatCompletionRequest{
-		Messages: []llm.ChatMessage{
-			{
-				Role:    "system",
-				Content: "You are a document analysis assistant. Answer questions based solely on the provided document content. Be precise and cite relevant sections.",
-			},
-			{
-				Role:    "user",
-				Content: fmt.Sprintf("Document from %s:\n\n%s\n\nQuestion: %s", uri, content, question),
-			},
+	result, err := a.LLM.ChatCompletion(ctx, []llm.ChatMessage{
+		{
+			Role:    "system",
+			Content: "You are a document analysis assistant. Answer questions based solely on the provided document content. Be precise and cite relevant sections.",
 		},
-	}
-
-	resp, err := a.LLM.ChatCompletion(ctx, req)
+		{
+			Role:    "user",
+			Content: fmt.Sprintf("Document from %s:\n\n%s\n\nQuestion: %s", uri, content, question),
+		},
+	}, nil, nil)
 	if err != nil {
 		return &agent.ToolResult{
 			Message:   fmt.Sprintf("Error querying document: %s", err.Error()),
@@ -108,14 +104,7 @@ func (t *DocumentQueryTool) Execute(ctx context.Context, a *agent.Agent, args ma
 		}, nil
 	}
 
-	if len(resp.Choices) == 0 {
-		return &agent.ToolResult{
-			Message:   "No response from document analysis.",
-			BreakLoop: false,
-		}, nil
-	}
-
-	answer, _ := resp.Choices[0].Message.Content.(string)
+	answer := result.Content
 	return &agent.ToolResult{
 		Message:   fmt.Sprintf("Document analysis (%s):\n\n%s", uri, answer),
 		BreakLoop: false,

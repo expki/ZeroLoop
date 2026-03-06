@@ -53,7 +53,7 @@ type searxngResponse struct {
 func (t *WebSearchTool) Execute(ctx context.Context, a *agent.Agent, args map[string]any) (*agent.ToolResult, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
-		return nil, fmt.Errorf("query is required")
+		return nil, fmt.Errorf(`query is required. Example: {"query": "search terms"}`)
 	}
 
 	maxResults := 10

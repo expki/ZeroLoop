@@ -31,7 +31,7 @@ type TextEditorTool struct {
 func (t *TextEditorTool) Name() string { return "text_editor" }
 
 func (t *TextEditorTool) Description() string {
-	return "Read, write, or patch text files. Methods: 'read' (view file with optional line range), 'write' (create/overwrite file), 'patch' (edit specific lines with stale detection)."
+	return "Read, write, or patch text files. Methods: 'read' (path required), 'write' (path AND text required — text is the full file content to write), 'patch' (path, text, start_line, end_line required)."
 }
 
 func (t *TextEditorTool) Parameters() any {
@@ -47,9 +47,9 @@ func (t *TextEditorTool) Parameters() any {
 				"type":        "string",
 				"description": "File path (absolute or relative to working directory)",
 			},
-			"content": map[string]any{
+			"text": map[string]any{
 				"type":        "string",
-				"description": "For write: full file content. For patch: replacement content for the specified line range.",
+				"description": "For write: full file content to write. For patch: replacement text for the specified line range.",
 			},
 			"start_line": map[string]any{
 				"type":        "integer",
@@ -68,11 +68,17 @@ func (t *TextEditorTool) Execute(ctx context.Context, a *agent.Agent, args map[s
 	method, _ := args["method"].(string)
 	path, _ := args["path"].(string)
 	if path == "" {
-		return nil, fmt.Errorf("path is required")
+		return nil, fmt.Errorf(`path is required. Example: {"method": "read", "path": "file.txt"}`)
 	}
 
 	// Resolve path based on project context
 	if a != nil && a.ProjectID != "" && t.FM != nil {
+		// If the model provides an absolute path that starts with the project dir,
+		// strip the prefix to make it relative (ValidatePath only accepts relative paths)
+		projectDir := t.FM.ProjectDir(a.ProjectID)
+		if filepath.IsAbs(path) && strings.HasPrefix(path, projectDir+string(filepath.Separator)) {
+			path = strings.TrimPrefix(path, projectDir+string(filepath.Separator))
+		}
 		// Project-scoped: validate and resolve within project directory
 		absPath, err := t.FM.ValidatePath(a.ProjectID, path)
 		if err != nil {
@@ -243,10 +249,10 @@ func (t *TextEditorTool) executeRead(path string, args map[string]any) (*agent.T
 }
 
 func (t *TextEditorTool) executeWrite(path string, args map[string]any) (*agent.ToolResult, error) {
-	content, ok := args["content"].(string)
+	content, ok := args["text"].(string)
 	if !ok || content == "" {
 		return &agent.ToolResult{
-			Message:   "Error: 'content' parameter is required for write method and must be a non-empty string.",
+			Message:   `Error: 'text' parameter is required for write method. You must include the file content to write in the 'text' field. Example: {"method": "write", "path": "file.txt", "text": "your text here"}`,
 			BreakLoop: false,
 		}, nil
 	}
@@ -281,7 +287,7 @@ func (t *TextEditorTool) executeWrite(path string, args map[string]any) (*agent.
 }
 
 func (t *TextEditorTool) executePatch(path string, args map[string]any) (*agent.ToolResult, error) {
-	content, _ := args["content"].(string)
+	content, _ := args["text"].(string)
 
 	startLine := 0
 	if s, ok := args["start_line"].(float64); ok {
@@ -292,7 +298,7 @@ func (t *TextEditorTool) executePatch(path string, args map[string]any) (*agent.
 		endLine = int(e)
 	}
 	if startLine <= 0 || endLine <= 0 {
-		return nil, fmt.Errorf("start_line and end_line are required for patch (1-based)")
+		return nil, fmt.Errorf(`start_line and end_line are required for patch (1-based). Example: {"method": "patch", "path": "file.txt", "text": "new content", "start_line": 5, "end_line": 10}`)
 	}
 
 	// Stale detection: check if file was modified since last read

@@ -97,7 +97,7 @@ func (t *CodeExecutionTool) Execute(ctx context.Context, a *agent.Agent, args ma
 	runtime, _ := args["runtime"].(string)
 	code, _ := args["code"].(string)
 	if code == "" {
-		return nil, fmt.Errorf("code is required")
+		return nil, fmt.Errorf(`code is required. Example: {"runtime": "shell", "code": "echo hello"}`)
 	}
 
 	sessionNum := 0

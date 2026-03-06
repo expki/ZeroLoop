@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -55,6 +57,8 @@ type Hub struct {
 	cancels       map[string]context.CancelFunc // chatID -> cancel function for current run
 	counters      map[string]*atomic.Int64      // chatID -> message number counter
 	chatToProject map[string]string             // chatID -> projectID cache
+	queues        map[string][]string           // chatID -> queued user messages
+	queueMu       sync.Mutex
 	llmClient     *llm.Client
 	fileManager   *filemanager.FileManager
 	tools         *agent.ToolRegistry
@@ -88,6 +92,7 @@ func NewHub(llmClient *llm.Client, fm *filemanager.FileManager) *Hub {
 		cancels:       make(map[string]context.CancelFunc),
 		counters:      make(map[string]*atomic.Int64),
 		chatToProject: make(map[string]string),
+		queues:        make(map[string][]string),
 		llmClient:     llmClient,
 		fileManager:   fm,
 		tools:         registry,
@@ -271,7 +276,25 @@ func (c *Client) handleMessage(msg WSMessage) {
 		c.mu.Lock()
 		c.chatID = payload.ChatID
 		c.mu.Unlock()
-		go c.hub.handleSendMessage(payload.ChatID, payload.Content)
+
+		// If agent is already running, queue the message instead of canceling
+		c.hub.agentMu.Lock()
+		_, isRunning := c.hub.cancels[payload.ChatID]
+		c.hub.agentMu.Unlock()
+		if isRunning {
+			c.hub.queueMessage(payload.ChatID, payload.Content)
+		} else {
+			go c.hub.handleSendMessage(payload.ChatID, payload.Content)
+		}
+
+	case "cancel":
+		var payload struct {
+			ChatID string `json:"chat_id"`
+		}
+		json.Unmarshal(msg.Payload, &payload)
+		if payload.ChatID != "" {
+			c.hub.handleCancel(payload.ChatID)
+		}
 
 	case "pause":
 		var payload struct {
@@ -286,6 +309,15 @@ func (c *Client) handleMessage(msg WSMessage) {
 		}
 		json.Unmarshal(msg.Payload, &payload)
 		c.hub.handleClear(payload.ChatID)
+
+	case "resume":
+		var payload struct {
+			ChatID string `json:"chat_id"`
+		}
+		json.Unmarshal(msg.Payload, &payload)
+		if payload.ChatID != "" {
+			go c.hub.handleResume(payload.ChatID)
+		}
 
 	case "intervene":
 		var payload struct {
@@ -381,6 +413,94 @@ func (h *Hub) createLogCallback(chatID string, counter *atomic.Int64) agent.LogC
 	}
 }
 
+// queueMessage saves a user message to the DB, broadcasts it, and adds it to the in-memory queue.
+func (h *Hub) queueMessage(chatID, content string) {
+	db := database.Get()
+
+	// Initialize counter from DB
+	counter := h.getCounter(chatID)
+
+	// Save user message to DB immediately so it appears in chat
+	userNo := int(counter.Add(1))
+	userMsg := models.Message{
+		ID:      uuid.New().String(),
+		ChatID:  chatID,
+		No:      userNo,
+		Type:    models.MessageTypeUser,
+		Content: content,
+	}
+	db.Create(&userMsg)
+
+	// Broadcast user message to clients
+	userMsgData, _ := json.Marshal(userMsg)
+	h.broadcast(chatID, WSMessage{Type: "message", Payload: userMsgData})
+
+	// Add to queue
+	h.queueMu.Lock()
+	h.queues[chatID] = append(h.queues[chatID], content)
+	h.queueMu.Unlock()
+
+	// Broadcast queue size update
+	h.queueMu.Lock()
+	queueLen := len(h.queues[chatID])
+	h.queueMu.Unlock()
+	queueData, _ := json.Marshal(map[string]any{"id": chatID, "queue_size": queueLen})
+	h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: queueData})
+}
+
+// popQueue removes and returns the next queued message, or "" if empty.
+func (h *Hub) popQueue(chatID string) string {
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	q := h.queues[chatID]
+	if len(q) == 0 {
+		return ""
+	}
+	msg := q[0]
+	h.queues[chatID] = q[1:]
+	return msg
+}
+
+// clearQueue removes all queued messages for a chat.
+func (h *Hub) clearQueue(chatID string) {
+	h.queueMu.Lock()
+	delete(h.queues, chatID)
+	h.queueMu.Unlock()
+}
+
+// handleCancel stops the current agent run and clears the message queue.
+func (h *Hub) handleCancel(chatID string) {
+	// Clear message queue first
+	h.clearQueue(chatID)
+
+	h.agentMu.Lock()
+	agentInstance, hasAgent := h.agents[chatID]
+	cancel, hasCancel := h.cancels[chatID]
+	if !hasCancel {
+		h.agentMu.Unlock()
+		// Broadcast to clear any stale queue UI state
+		updateData, _ := json.Marshal(map[string]any{"id": chatID, "running": false, "paused": false, "queue_size": 0})
+		h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: updateData})
+		return
+	}
+
+	// Set cancelled flag BEFORE canceling so the agent returns ErrCancelled
+	if hasAgent {
+		agentInstance.SetCancelled(true)
+		agentInstance.CancelTools() // Stop any in-progress tool execution
+	}
+	cancel()
+	delete(h.cancels, chatID)
+	h.agentMu.Unlock()
+
+	// Update DB and broadcast cancelled state
+	db := database.Get()
+	db.Model(&models.Chat{}).Where("id = ?", chatID).Update("running", false)
+
+	updateData, _ := json.Marshal(map[string]any{"id": chatID, "running": false, "paused": false, "queue_size": 0})
+	h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: updateData})
+}
+
 func (h *Hub) handleSendMessage(chatID, content string) {
 	db := database.Get()
 
@@ -418,11 +538,7 @@ func (h *Hub) handleSendMessage(chatID, content string) {
 		Payload: userMsgData,
 	})
 
-	// Cancel any existing agent run for this chat
 	h.agentMu.Lock()
-	if cancel, ok := h.cancels[chatID]; ok {
-		cancel()
-	}
 
 	// Mark chat as running
 	db.Model(&chat).Update("running", true)
@@ -447,13 +563,17 @@ func (h *Hub) handleSendMessage(chatID, content string) {
 		agentInstance.FileEventCallback = func(event agent.FileEvent) {
 			eventData, _ := json.Marshal(event)
 			h.broadcastToProject(event.ProjectID, WSMessage{
-				Type:    "file_" + event.Action,
+				Type:    "file_event",
 				Payload: eventData,
 			})
 		}
 		// Cache the mapping
 		h.chatToProject[chatID] = chat.ProjectID
 	}
+
+	// Clear any previous pause/cancelled state when sending a new message
+	agentInstance.SetPaused(false)
+	agentInstance.SetCancelled(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	h.cancels[chatID] = cancel
@@ -463,9 +583,42 @@ func (h *Hub) handleSendMessage(chatID, content string) {
 	_, err := agentInstance.Run(ctx, content)
 	cancel()
 
+	// Clean up cancel from map
+	h.agentMu.Lock()
+	delete(h.cancels, chatID)
+	h.agentMu.Unlock()
+
+	// If paused, handlePause already updated the state — exit quietly
+	if errors.Is(err, agent.ErrPaused) {
+		return
+	}
+
+	// If cancelled, handleCancel already updated the state — exit quietly
+	if errors.Is(err, agent.ErrCancelled) {
+		agentInstance.SetCancelled(false)
+		return
+	}
+
+	// Agent completed normally — clear any pause state
+	agentInstance.SetPaused(false)
+
+	// Check for queued messages before marking as not running
+	if nextMsg := h.popQueue(chatID); nextMsg != "" {
+		// Broadcast queue size update
+		h.queueMu.Lock()
+		queueLen := len(h.queues[chatID])
+		h.queueMu.Unlock()
+		queueData, _ := json.Marshal(map[string]any{"id": chatID, "queue_size": queueLen})
+		h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: queueData})
+
+		// Process next queued message (reuse goroutine)
+		h.handleSendMessage(chatID, nextMsg)
+		return
+	}
+
 	// Mark chat as not running
 	db.Model(&chat).Update("running", false)
-	chatDoneData, _ := json.Marshal(map[string]any{"id": chatID, "running": false})
+	chatDoneData, _ := json.Marshal(map[string]any{"id": chatID, "running": false, "queue_size": 0})
 	h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: chatDoneData})
 
 	if err != nil {
@@ -490,31 +643,23 @@ func (h *Hub) autoNameChat(chatID, userMessage string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	req := &llm.ChatCompletionRequest{
-		Messages: []llm.ChatMessage{
-			{
-				Role:    "system",
-				Content: "You are a chat naming assistant. Respond with ONLY a short chat name (1-4 words) based on the user's message. No formatting, no quotes, no punctuation at the end. Use proper capitalization. Examples: Database Setup, Image Analysis, Code Review, Weather App",
-			},
-			{
-				Role:    "user",
-				Content: userMessage,
-			},
+	result, err := h.llmClient.ChatCompletion(ctx, []llm.ChatMessage{
+		{
+			Role:    "system",
+			Content: "You are a chat naming assistant. Respond with ONLY a short chat name (1-4 words) based on the user's message. No formatting, no quotes, no punctuation at the end. Use proper capitalization. Examples: Database Setup, Image Analysis, Code Review, Weather App",
 		},
-	}
-
-	resp, err := h.llmClient.ChatCompletion(ctx, req)
+		{
+			Role:    "user",
+			Content: userMessage,
+		},
+	}, nil, nil)
 	if err != nil {
 		logger.Log.Debugw("auto-name failed", "chat_id", chatID, "error", err)
 		return
 	}
 
-	if len(resp.Choices) == 0 || resp.Choices[0].Message.Content == nil {
-		return
-	}
-
-	name, ok := resp.Choices[0].Message.Content.(string)
-	if !ok || name == "" {
+	name := result.Content
+	if name == "" {
 		return
 	}
 
@@ -543,17 +688,116 @@ func (h *Hub) autoNameChat(chatID, userMessage string) {
 
 func (h *Hub) handlePause(chatID string) {
 	h.agentMu.Lock()
-	defer h.agentMu.Unlock()
+	agentInstance, hasAgent := h.agents[chatID]
+	cancel, hasCancel := h.cancels[chatID]
+	if !hasCancel {
+		h.agentMu.Unlock()
+		return // Nothing running to pause
+	}
+
+	// Set paused flag BEFORE canceling so the agent returns ErrPaused (not a raw error)
+	if hasAgent {
+		agentInstance.SetPaused(true)
+	}
+	cancel()
+	delete(h.cancels, chatID)
+	h.agentMu.Unlock()
+
+	// Best-effort slot save to preserve KV cache for faster resume
+	slotFilename := fmt.Sprintf("zeroloop_pause_%s", chatID)
+	saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := h.llmClient.SlotSave(saveCtx, 0, slotFilename); err != nil {
+		logger.Log.Debugw("slot save skipped (best-effort)", "chat_id", chatID, "error", err)
+	}
+	saveCancel()
+
+	// Update DB and broadcast paused state
+	db := database.Get()
+	db.Model(&models.Chat{}).Where("id = ?", chatID).Update("running", false)
+
+	chatUpdateData, _ := json.Marshal(map[string]any{"id": chatID, "running": false, "paused": true})
+	h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: chatUpdateData})
+}
+
+func (h *Hub) handleResume(chatID string) {
+	h.agentMu.Lock()
+	agentInstance, hasAgent := h.agents[chatID]
+	if !hasAgent || !agentInstance.IsPaused() {
+		h.agentMu.Unlock()
+		return // Nothing to resume
+	}
+
+	// Cancel any stale context (shouldn't exist, but be safe)
 	if cancel, ok := h.cancels[chatID]; ok {
 		cancel()
-		delete(h.cancels, chatID)
-		// Agent is preserved in h.agents so history is kept
+	}
 
-		db := database.Get()
-		db.Model(&models.Chat{}).Where("id = ?", chatID).Update("running", false)
+	// Ensure counter is initialized
+	counter := h.counters[chatID]
+	if counter == nil {
+		counter = &atomic.Int64{}
+		h.counters[chatID] = counter
+		var msgCount int64
+		database.Get().Model(&models.Message{}).Where("chat_id = ?", chatID).Count(&msgCount)
+		counter.Store(msgCount)
+	}
 
-		chatUpdateData, _ := json.Marshal(map[string]any{"id": chatID, "running": false})
-		h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: chatUpdateData})
+	// Refresh log callback with current counter
+	agentInstance.OnLog = h.createLogCallback(chatID, counter)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	h.cancels[chatID] = cancel
+	h.agentMu.Unlock()
+
+	// Best-effort slot restore for faster prompt processing
+	slotFilename := fmt.Sprintf("zeroloop_pause_%s", chatID)
+	restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := h.llmClient.SlotRestore(restoreCtx, 0, slotFilename); err != nil {
+		logger.Log.Debugw("slot restore skipped (best-effort)", "chat_id", chatID, "error", err)
+	}
+	restoreCancel()
+
+	// Mark chat as running
+	db := database.Get()
+	db.Model(&models.Chat{}).Where("id = ?", chatID).Update("running", true)
+	chatUpdateData, _ := json.Marshal(map[string]any{"id": chatID, "running": true, "paused": false})
+	h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: chatUpdateData})
+
+	// Continue agent loop from where it was paused
+	_, err := agentInstance.Continue(ctx)
+	cancel()
+
+	// Clean up cancel from map
+	h.agentMu.Lock()
+	delete(h.cancels, chatID)
+	h.agentMu.Unlock()
+
+	// If paused again, exit quietly
+	if errors.Is(err, agent.ErrPaused) {
+		return
+	}
+
+	// Agent completed — clear pause state and erase saved slot
+	agentInstance.SetPaused(false)
+	eraseCtx, eraseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := h.llmClient.SlotErase(eraseCtx, 0); err != nil {
+		logger.Log.Debugw("slot erase skipped (best-effort)", "chat_id", chatID, "error", err)
+	}
+	eraseCancel()
+
+	db.Model(&models.Chat{}).Where("id = ?", chatID).Update("running", false)
+	chatDoneData, _ := json.Marshal(map[string]any{"id": chatID, "running": false})
+	h.broadcast(chatID, WSMessage{Type: "chat_update", Payload: chatDoneData})
+
+	if err != nil {
+		logger.Log.Errorw("agent resume failed", "chat_id", chatID, "error", err)
+		errMsgData, _ := json.Marshal(map[string]any{
+			"chat_id": chatID,
+			"type":    "error",
+			"heading": "Agent Error",
+			"content": err.Error(),
+		})
+		h.broadcast(chatID, WSMessage{Type: "message", Payload: errMsgData})
 	}
 }
 
@@ -606,7 +850,13 @@ func (h *Hub) handleIntervene(chatID, content string) {
 // cleanupChat cancels any running agent and removes in-memory state for a chat.
 // Does NOT broadcast to WS clients or touch the database.
 func (h *Hub) cleanupChat(chatID string) {
+	h.clearQueue(chatID)
+
 	h.agentMu.Lock()
+	if agentInstance, ok := h.agents[chatID]; ok {
+		agentInstance.SetCancelled(true)
+		agentInstance.CancelTools()
+	}
 	if cancel, ok := h.cancels[chatID]; ok {
 		cancel()
 		delete(h.cancels, chatID)
@@ -614,4 +864,11 @@ func (h *Hub) cleanupChat(chatID string) {
 	delete(h.agents, chatID)
 	delete(h.counters, chatID)
 	h.agentMu.Unlock()
+
+	// Best-effort slot erase to free server memory
+	eraseCtx, eraseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := h.llmClient.SlotErase(eraseCtx, 0); err != nil {
+		logger.Log.Debugw("slot erase skipped (best-effort)", "chat_id", chatID, "error", err)
+	}
+	eraseCancel()
 }

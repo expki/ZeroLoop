@@ -131,7 +131,7 @@ func (t *SchedulerTool) listTasks() (*agent.ToolResult, error) {
 func (t *SchedulerTool) findTaskByName(args map[string]any) (*agent.ToolResult, error) {
 	name, _ := args["name"].(string)
 	if name == "" {
-		return nil, fmt.Errorf("name is required")
+		return nil, fmt.Errorf(`name is required. Example: {"method": "find_task_by_name", "name": "task name"}`)
 	}
 
 	taskStore.Lock()
@@ -157,7 +157,7 @@ func (t *SchedulerTool) findTaskByName(args map[string]any) (*agent.ToolResult, 
 func (t *SchedulerTool) showTask(args map[string]any) (*agent.ToolResult, error) {
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
-		return nil, fmt.Errorf("task_id is required")
+		return nil, fmt.Errorf(`task_id is required. Example: {"method": "show_task", "task_id": "task-uuid"}`)
 	}
 
 	taskStore.Lock()
@@ -181,7 +181,7 @@ func (t *SchedulerTool) showTask(args map[string]any) (*agent.ToolResult, error)
 func (t *SchedulerTool) runTask(ctx context.Context, a *agent.Agent, args map[string]any) (*agent.ToolResult, error) {
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
-		return nil, fmt.Errorf("task_id is required")
+		return nil, fmt.Errorf(`task_id is required. Example: {"method": "show_task", "task_id": "task-uuid"}`)
 	}
 
 	taskStore.Lock()
@@ -220,7 +220,7 @@ func (t *SchedulerTool) runTask(ctx context.Context, a *agent.Agent, args map[st
 func (t *SchedulerTool) deleteTask(args map[string]any) (*agent.ToolResult, error) {
 	taskID, _ := args["task_id"].(string)
 	if taskID == "" {
-		return nil, fmt.Errorf("task_id is required")
+		return nil, fmt.Errorf(`task_id is required. Example: {"method": "show_task", "task_id": "task-uuid"}`)
 	}
 
 	taskStore.Lock()
@@ -249,7 +249,7 @@ func (t *SchedulerTool) createScheduledTask(args map[string]any) (*agent.ToolRes
 	schedule, _ := args["schedule"].(string)
 
 	if name == "" || desc == "" || schedule == "" {
-		return nil, fmt.Errorf("name, description, and schedule are required")
+		return nil, fmt.Errorf(`name, description, and schedule are required. Example: {"method": "create_scheduled_task", "name": "task name", "description": "what to do", "schedule": "*/5 * * * *"}`)
 	}
 
 	task := &ScheduledTask{
@@ -277,7 +277,7 @@ func (t *SchedulerTool) createAdhocTask(args map[string]any) (*agent.ToolResult,
 	desc, _ := args["description"].(string)
 
 	if name == "" || desc == "" {
-		return nil, fmt.Errorf("name and description are required")
+		return nil, fmt.Errorf(`name and description are required. Example: {"method": "create_adhoc_task", "name": "task name", "description": "what to do"}`)
 	}
 
 	task := &ScheduledTask{
@@ -305,7 +305,7 @@ func (t *SchedulerTool) createPlannedTask(args map[string]any) (*agent.ToolResul
 	plannedTimes, _ := args["planned_times"].(string)
 
 	if name == "" || desc == "" || plannedTimes == "" {
-		return nil, fmt.Errorf("name, description, and planned_times are required")
+		return nil, fmt.Errorf(`name, description, and planned_times are required. Example: {"method": "create_planned_task", "name": "task name", "description": "what to do", "planned_times": "2024-01-01T00:00:00Z"}`)
 	}
 
 	times := strings.Split(plannedTimes, ",")

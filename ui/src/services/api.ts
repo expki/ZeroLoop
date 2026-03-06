@@ -109,4 +109,24 @@ export const api = {
     }),
 
   checkLLMHealth: () => request<{ status: string }>('/health/llm'),
+
+  codeComplete: async (
+    prefix: string,
+    suffix: string,
+    maxTokens: number,
+    signal?: AbortSignal
+  ): Promise<{ text: string }> => {
+    try {
+      const res = await fetch(`${API_BASE}/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefix, suffix, max_tokens: maxTokens }),
+        signal,
+      })
+      if (!res.ok) return { text: '' }
+      return res.json()
+    } catch {
+      return { text: '' }
+    }
+  },
 }

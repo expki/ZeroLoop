@@ -35,41 +35,108 @@ func TestHealth(t *testing.T) {
 	}
 }
 
-func TestModels(t *testing.T) {
+func TestProps(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			t.Errorf("expected /v1/models, got %s", r.URL.Path)
+		if r.URL.Path != "/props" {
+			t.Errorf("expected /props, got %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode(ModelListResponse{
-			Object: "list",
-			Data:   []ModelEntry{{ID: "test-model", Object: "model"}},
+		json.NewEncoder(w).Encode(PropsResponse{
+			TotalSlots: 2,
+			ModelPath:  "/models/test.gguf",
 		})
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	models, err := c.Models(context.Background())
+	props, err := c.Props(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models.Data) != 1 || models.Data[0].ID != "test-model" {
-		t.Errorf("unexpected models: %+v", models)
+	if props.TotalSlots != 2 {
+		t.Errorf("expected 2 slots, got %d", props.TotalSlots)
+	}
+	if props.ModelPath != "/models/test.gguf" {
+		t.Errorf("expected model path, got %s", props.ModelPath)
+	}
+}
+
+func TestCompletion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/completion" {
+			t.Errorf("expected /completion, got %s", r.URL.Path)
+		}
+		var req CompletionRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.Stream {
+			t.Error("expected stream=false for non-streaming request")
+		}
+		json.NewEncoder(w).Encode(CompletionResponse{
+			Content:  "Hello World!",
+			Stop:     true,
+			StopType: "eos",
+			Model:    "test-model",
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	resp, err := c.Completion(context.Background(), &CompletionRequest{
+		Prompt: "Say hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "Hello World!" {
+		t.Errorf("expected 'Hello World!', got '%s'", resp.Content)
+	}
+}
+
+func TestCompletionStream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+
+		chunks := []CompletionChunk{
+			{Content: "Hello", Stop: false},
+			{Content: " ", Stop: false},
+			{Content: "World", Stop: false},
+			{Content: "", Stop: true, StopType: "eos"},
+		}
+		for _, chunk := range chunks {
+			b, _ := json.Marshal(chunk)
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var collected string
+	var chunkCount int
+	err := c.CompletionStream(context.Background(), &CompletionRequest{
+		Prompt: "Say hello",
+	}, func(chunk CompletionChunk) error {
+		chunkCount++
+		collected += chunk.Content
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chunkCount != 4 {
+		t.Errorf("expected 4 chunks, got %d", chunkCount)
+	}
+	if collected != "Hello World" {
+		t.Errorf("expected 'Hello World', got '%s'", collected)
 	}
 }
 
 func TestChatCompletion(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req ChatCompletionRequest
-		json.NewDecoder(r.Body).Decode(&req)
-		if req.Stream {
-			t.Error("expected stream=false for non-streaming request")
-		}
-		if len(req.Messages) == 0 {
-			t.Error("expected at least one message")
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("expected /v1/chat/completions, got %s", r.URL.Path)
 		}
 		json.NewEncoder(w).Encode(ChatCompletionResponse{
-			ID:     "test-id",
-			Object: "chat.completion",
 			Choices: []Choice{
 				{
 					Index: 0,
@@ -85,40 +152,30 @@ func TestChatCompletion(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	resp, err := c.ChatCompletion(context.Background(), &ChatCompletionRequest{
-		Messages: []ChatMessage{{Role: "user", Content: "Hi"}},
-	})
+	result, err := c.ChatCompletion(context.Background(), []ChatMessage{
+		{Role: "user", Content: "Hi"},
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Choices) != 1 {
-		t.Fatalf("expected 1 choice, got %d", len(resp.Choices))
-	}
-	content, ok := resp.Choices[0].Message.Content.(string)
-	if !ok || content != "Hello!" {
-		t.Errorf("unexpected content: %v", resp.Choices[0].Message.Content)
+	if result.Content != "Hello!" {
+		t.Errorf("expected 'Hello!', got '%s'", result.Content)
 	}
 }
 
 func TestChatCompletionStream(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("expected /v1/chat/completions, got %s", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
-
-		chunks := []string{"Hello", " ", "World"}
+		chunks := []ChatCompletionChunk{
+			{Choices: []ChunkChoice{{Delta: ChunkDelta{Content: "Hello"}}}},
+			{Choices: []ChunkChoice{{Delta: ChunkDelta{Content: " World"}}}},
+		}
 		for _, chunk := range chunks {
-			content := chunk
-			data := ChatCompletionChunk{
-				ID:     "test",
-				Object: "chat.completion.chunk",
-				Choices: []ChunkChoice{
-					{
-						Index: 0,
-						Delta: ChunkDelta{Content: &content},
-					},
-				},
-			}
-			b, _ := json.Marshal(data)
+			b, _ := json.Marshal(chunk)
 			fmt.Fprintf(w, "data: %s\n\n", b)
 			flusher.Flush()
 		}
@@ -129,28 +186,121 @@ func TestChatCompletionStream(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	var collected string
-	var chunkCount int
-	err := c.ChatCompletionStream(context.Background(), &ChatCompletionRequest{
-		Messages: []ChatMessage{{Role: "user", Content: "Hi"}},
-	}, func(chunk ChatCompletionChunk) error {
-		chunkCount++
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != nil {
-			collected += *chunk.Choices[0].Delta.Content
-		}
+	result, err := c.ChatCompletionStream(context.Background(), []ChatMessage{
+		{Role: "user", Content: "Hi"},
+	}, nil, nil, func(text string) error {
+		collected += text
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chunkCount != 3 {
-		t.Errorf("expected 3 chunks, got %d", chunkCount)
-	}
 	if collected != "Hello World" {
-		t.Errorf("expected 'Hello World', got '%s'", collected)
+		t.Errorf("expected 'Hello World' from callback, got '%s'", collected)
+	}
+	if result.Content != "Hello World" {
+		t.Errorf("expected 'Hello World' from result, got '%s'", result.Content)
 	}
 }
 
-func TestChatCompletionError(t *testing.T) {
+func TestChatCompletionWithToolCalls(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("expected /v1/chat/completions, got %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(ChatCompletionResponse{
+			Choices: []Choice{
+				{
+					Index: 0,
+					Message: ChatMessage{
+						Role:    "assistant",
+						Content: "I'll search for that.",
+						ToolCalls: []ToolCall{
+							{
+								Index: 0,
+								ID:    "call_123",
+								Type:  "function",
+								Function: ToolCallFunction{
+									Name:      "web_search",
+									Arguments: `{"query": "golang best practices"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	result, err := c.ChatCompletion(context.Background(), []ChatMessage{
+		{Role: "user", Content: "Search for golang best practices"},
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content != "I'll search for that." {
+		t.Errorf("unexpected content: %q", result.Content)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.ToolCalls))
+	}
+	if result.ToolCalls[0].Function.Name != "web_search" {
+		t.Errorf("expected 'web_search', got %q", result.ToolCalls[0].Function.Name)
+	}
+}
+
+func TestChatCompletionStreamWithToolCalls(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		chunks := []ChatCompletionChunk{
+			{Choices: []ChunkChoice{{Delta: ChunkDelta{
+				ToolCalls: []ToolCall{{Index: 0, ID: "call_1", Type: "function", Function: ToolCallFunction{Name: "web_search", Arguments: ""}}},
+			}}}},
+			{Choices: []ChunkChoice{{Delta: ChunkDelta{
+				ToolCalls: []ToolCall{{Index: 0, Function: ToolCallFunction{Arguments: `{"query":`}}},
+			}}}},
+			{Choices: []ChunkChoice{{Delta: ChunkDelta{
+				ToolCalls: []ToolCall{{Index: 0, Function: ToolCallFunction{Arguments: ` "test"}`}}},
+			}}}},
+		}
+		for _, chunk := range chunks {
+			b, _ := json.Marshal(chunk)
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	result, err := c.ChatCompletionStream(context.Background(), []ChatMessage{
+		{Role: "user", Content: "Search"},
+	}, nil, nil, func(text string) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.ToolCalls))
+	}
+	if result.ToolCalls[0].Function.Name != "web_search" {
+		t.Errorf("expected 'web_search', got %q", result.ToolCalls[0].Function.Name)
+	}
+	if result.ToolCalls[0].Function.Arguments != `{"query": "test"}` {
+		t.Errorf("unexpected arguments: %q", result.ToolCalls[0].Function.Arguments)
+	}
+	if result.ToolCalls[0].ID != "call_1" {
+		t.Errorf("expected id 'call_1', got %q", result.ToolCalls[0].ID)
+	}
+}
+
+func TestCompletionError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(`{"error": {"message": "bad request"}}`))
@@ -158,15 +308,15 @@ func TestChatCompletionError(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	_, err := c.ChatCompletion(context.Background(), &ChatCompletionRequest{
-		Messages: []ChatMessage{{Role: "user", Content: "Hi"}},
+	_, err := c.Completion(context.Background(), &CompletionRequest{
+		Prompt: "test",
 	})
 	if err == nil {
 		t.Error("expected error for bad request")
 	}
 }
 
-func TestChatCompletionStreamError(t *testing.T) {
+func TestCompletionStreamError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`service unavailable`))
@@ -174,9 +324,9 @@ func TestChatCompletionStreamError(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	err := c.ChatCompletionStream(context.Background(), &ChatCompletionRequest{
-		Messages: []ChatMessage{{Role: "user", Content: "Hi"}},
-	}, func(chunk ChatCompletionChunk) error {
+	err := c.CompletionStream(context.Background(), &CompletionRequest{
+		Prompt: "test",
+	}, func(chunk CompletionChunk) error {
 		t.Error("callback should not be called on error")
 		return nil
 	})
@@ -194,13 +344,9 @@ func TestHealthError(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	health, err := c.Health(context.Background())
-	// Health doesn't check status code, it just tries to decode JSON.
-	// With invalid JSON, it should return an error.
 	if err != nil {
-		// Expected: non-JSON body causes decode error
 		return
 	}
-	// If it somehow decoded, status should not be "ok"
 	if health.Status == "ok" {
 		t.Error("expected non-ok status from 503 response")
 	}

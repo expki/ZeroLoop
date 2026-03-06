@@ -62,7 +62,7 @@ func (t *KnowledgeTool) Execute(ctx context.Context, a *agent.Agent, args map[st
 func (t *KnowledgeTool) executeSearch(args map[string]any) (*agent.ToolResult, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
-		return nil, fmt.Errorf("query is required for search action")
+		return nil, fmt.Errorf(`query is required for search action. Example: {"action": "search", "query": "search terms"}`)
 	}
 
 	results, err := search.Search(query, 10)
@@ -110,7 +110,7 @@ func (t *KnowledgeTool) executeSearch(args map[string]any) (*agent.ToolResult, e
 func (t *KnowledgeTool) executeSave(args map[string]any) (*agent.ToolResult, error) {
 	content, _ := args["content"].(string)
 	if content == "" {
-		return nil, fmt.Errorf("content is required for save action")
+		return nil, fmt.Errorf(`content is required for save action. Example: {"action": "save", "content": "knowledge to store", "heading": "title"}`)
 	}
 
 	heading, _ := args["heading"].(string)

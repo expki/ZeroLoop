@@ -44,7 +44,7 @@ func (t *VisionTool) Parameters() any {
 func (t *VisionTool) Execute(ctx context.Context, a *agent.Agent, args map[string]any) (*agent.ToolResult, error) {
 	path, _ := args["path"].(string)
 	if path == "" {
-		return nil, fmt.Errorf("path is required")
+		return nil, fmt.Errorf(`path is required. Example: {"path": "/path/to/image.png"}`)
 	}
 
 	// Resolve relative paths

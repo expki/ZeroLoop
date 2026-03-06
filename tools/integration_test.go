@@ -66,9 +66,9 @@ func TestTextEditorWriteAndRead(t *testing.T) {
 
 	// Write file
 	result, err := tool.Execute(context.Background(), nil, map[string]any{
-		"method":  "write",
-		"path":    tmpFile,
-		"content": content,
+		"method": "write",
+		"path":   tmpFile,
+		"text":   content,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -98,9 +98,9 @@ func TestTextEditorWriteEmptyContent(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "empty.txt")
 
 	result, err := tool.Execute(context.Background(), nil, map[string]any{
-		"method":  "write",
-		"path":    tmpFile,
-		"content": "",
+		"method": "write",
+		"path":   tmpFile,
+		"text":   "",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -137,9 +137,9 @@ func TestTextEditorWriteCreatesParentDirs(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "deep", "nested", "dir", "file.txt")
 
 	result, err := tool.Execute(context.Background(), nil, map[string]any{
-		"method":  "write",
-		"path":    tmpFile,
-		"content": "nested content",
+		"method": "write",
+		"path":   tmpFile,
+		"text":   "nested content",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestTextEditorPatch(t *testing.T) {
 	result, err := tool.Execute(context.Background(), nil, map[string]any{
 		"method":     "patch",
 		"path":       tmpFile,
-		"content":    "replaced_a\nreplaced_b",
+		"text":       "replaced_a\nreplaced_b",
 		"start_line": float64(2),
 		"end_line":   float64(3),
 	})
@@ -250,7 +250,7 @@ func TestTextEditorPatchStaleDetection(t *testing.T) {
 	result, err := tool.Execute(context.Background(), nil, map[string]any{
 		"method":     "patch",
 		"path":       tmpFile,
-		"content":    "new content",
+		"text":       "new content",
 		"start_line": float64(1),
 		"end_line":   float64(1),
 	})
@@ -265,9 +265,9 @@ func TestTextEditorPatchStaleDetection(t *testing.T) {
 func TestTextEditorPatchMissingLines(t *testing.T) {
 	tool := &TextEditorTool{}
 	_, err := tool.Execute(context.Background(), nil, map[string]any{
-		"method":  "patch",
-		"path":    "/tmp/anything.txt",
-		"content": "x",
+		"method": "patch",
+		"path":   "/tmp/anything.txt",
+		"text":   "x",
 	})
 	if err == nil {
 		t.Error("expected error for missing start_line/end_line")

@@ -7,9 +7,15 @@ function ChatInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendMessage = useChatStore((s) => s.sendMessage)
   const paused = useChatStore((s) => s.paused)
+  const queueSize = useChatStore((s) => s.queueSize)
   const togglePause = useChatStore((s) => s.togglePause)
+  const cancelChat = useChatStore((s) => s.cancelChat)
   const clearChat = useChatStore((s) => s.clearChat)
   const exportChat = useChatStore((s) => s.exportChat)
+  const isRunning = useChatStore((s) => {
+    const chat = s.chats.find((c) => c.id === s.selectedChatId)
+    return chat?.running ?? false
+  })
 
   const handleSend = useCallback(() => {
     if (!input.trim()) return
@@ -56,12 +62,30 @@ function ChatInput() {
         </button>
       </div>
       <div className="input-actions">
-        <button className="action-btn" onClick={togglePause}>
+        <button
+          className="action-btn"
+          onClick={togglePause}
+          disabled={!paused && !isRunning}
+        >
           <span className="material-symbols-outlined">
             {paused ? 'play_arrow' : 'pause'}
           </span>
           <span className="action-label">{paused ? 'Resume' : 'Pause'}</span>
         </button>
+        <button
+          className="action-btn action-btn-cancel"
+          onClick={cancelChat}
+          disabled={!isRunning && !paused}
+        >
+          <span className="material-symbols-outlined">cancel</span>
+          <span className="action-label">Cancel</span>
+        </button>
+        {queueSize > 0 && (
+          <span className="queue-indicator">
+            <span className="material-symbols-outlined">queue</span>
+            <span className="queue-count">{queueSize}</span>
+          </span>
+        )}
         <button className="action-btn" onClick={clearChat}>
           <span className="material-symbols-outlined">delete_sweep</span>
           <span className="action-label">Clear</span>

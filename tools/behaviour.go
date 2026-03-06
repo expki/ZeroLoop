@@ -97,7 +97,7 @@ func (t *BehaviourAdjustmentTool) executeReset() (*agent.ToolResult, error) {
 func (t *BehaviourAdjustmentTool) executeUpdate(ctx context.Context, a *agent.Agent, args map[string]any) (*agent.ToolResult, error) {
 	newRules, _ := args["rules"].(string)
 	if newRules == "" {
-		return nil, fmt.Errorf("rules is required for update action")
+		return nil, fmt.Errorf(`rules is required for update action. Example: {"action": "update", "rules": "new behavioral rules"}`)
 	}
 
 	// Read existing rules
@@ -117,23 +117,17 @@ func (t *BehaviourAdjustmentTool) executeUpdate(ctx context.Context, a *agent.Ag
 			existingRules, newRules,
 		)
 
-		req := &llm.ChatCompletionRequest{
-			Messages: []llm.ChatMessage{
-				{Role: "system", Content: "You merge behavioral rules. Output ONLY the merged rules."},
-				{Role: "user", Content: mergePrompt},
-			},
-		}
-
-		resp, err := a.LLM.ChatCompletion(ctx, req)
+		result, err := a.LLM.ChatCompletion(ctx, []llm.ChatMessage{
+			{Role: "system", Content: "You merge behavioral rules. Output ONLY the merged rules."},
+			{Role: "user", Content: mergePrompt},
+		}, nil, nil)
 		if err != nil {
 			// Fallback: just append
 			mergedRules = existingRules + "\n\n" + newRules
-		} else if len(resp.Choices) > 0 {
-			if content, ok := resp.Choices[0].Message.Content.(string); ok {
-				mergedRules = strings.TrimSpace(content)
-			} else {
-				mergedRules = existingRules + "\n\n" + newRules
-			}
+		} else if result.Content != "" {
+			mergedRules = strings.TrimSpace(result.Content)
+		} else {
+			mergedRules = existingRules + "\n\n" + newRules
 		}
 	}
 

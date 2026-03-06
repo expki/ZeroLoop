@@ -21,6 +21,7 @@ import { go } from '@codemirror/lang-go'
 import { useProjectStore } from '../stores/projectStore'
 import { useUIStore } from '../stores/uiStore'
 import { api } from '../services/api'
+import { ghostTextExtension } from '../extensions/ghostText'
 import './FileEditor.css'
 
 function getLanguageExtension(filename: string) {
@@ -88,6 +89,11 @@ function FileEditor({ filePath }: FileEditorProps) {
         if (destroyed || !editorRef.current) return
         contentRef.current = content
 
+        const completionFn = async (prefix: string, suffix: string, signal: AbortSignal): Promise<string> => {
+          const result = await api.codeComplete(prefix, suffix, 128, signal)
+          return result.text
+        }
+
         const extensions = [
           lineNumbers(),
           highlightActiveLine(),
@@ -101,6 +107,7 @@ function FileEditor({ filePath }: FileEditorProps) {
             { key: 'Mod-s', run: () => { saveFile(); return true } },
           ]),
           getLanguageExtension(filePath),
+          ghostTextExtension(completionFn),
           EditorView.lineWrapping,
           theme === 'dark' ? oneDark : [],
         ]

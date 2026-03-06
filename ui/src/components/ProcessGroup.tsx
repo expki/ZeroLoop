@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import type { Message, DetailMode } from '../types'
+import { useChatStore } from '../stores/chatStore'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import './ProcessGroup.css'
@@ -116,6 +117,11 @@ interface ProcessGroupProps {
 
 function ProcessGroup({ steps, response, detailMode }: ProcessGroupProps) {
   const [isOpen, setIsOpen] = useState(detailMode !== 'collapsed')
+  const paused = useChatStore((s) => s.paused)
+  const isRunning = useChatStore((s) => {
+    const chat = s.chats.find((c) => c.id === s.selectedChatId)
+    return chat?.running ?? false
+  })
   const lastStep = steps[steps.length - 1]
   const badge = getBadge(lastStep.type, lastStep.kvps)
   const title = steps[0]?.heading || 'Processing'
@@ -148,7 +154,12 @@ function ProcessGroup({ steps, response, detailMode }: ProcessGroupProps) {
           <span className="step-count">
             {steps.length} step{steps.length !== 1 ? 's' : ''}
           </span>
-          {!isComplete && (
+          {!isComplete && paused && (
+            <span className="group-spinner">
+              <span className="material-symbols-outlined">pause</span>
+            </span>
+          )}
+          {!isComplete && !paused && isRunning && (
             <span className="group-spinner">
               <span className="material-symbols-outlined spinning">progress_activity</span>
             </span>

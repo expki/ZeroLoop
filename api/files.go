@@ -214,7 +214,7 @@ func broadcastFileEvent(hub *Hub, projectID, path, name string, size int64, acti
 		"action":     action,
 	})
 	hub.broadcastToProject(projectID, WSMessage{
-		Type:    "file_" + action,
+		Type:    "file_event",
 		Payload: eventData,
 	})
 }

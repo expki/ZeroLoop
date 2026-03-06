@@ -36,7 +36,7 @@ func (t *CallSubordinateTool) Parameters() any {
 func (t *CallSubordinateTool) Execute(ctx context.Context, a *agent.Agent, args map[string]any) (*agent.ToolResult, error) {
 	message, _ := args["message"].(string)
 	if message == "" {
-		return nil, fmt.Errorf("message is required")
+		return nil, fmt.Errorf(`message is required. Example: {"message": "task description for the subordinate"}`)
 	}
 
 	profile, _ := args["profile"].(string)

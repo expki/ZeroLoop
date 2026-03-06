@@ -81,7 +81,7 @@ func (t *MemoryTool) Execute(ctx context.Context, a *agent.Agent, args map[strin
 func (t *MemoryTool) executeSave(args map[string]any) (*agent.ToolResult, error) {
 	content, _ := args["content"].(string)
 	if content == "" {
-		return nil, fmt.Errorf("content is required for save action")
+		return nil, fmt.Errorf(`content is required for save action. Example: {"action": "save", "content": "information to remember", "heading": "title"}`)
 	}
 
 	heading, _ := args["heading"].(string)
@@ -121,7 +121,7 @@ func (t *MemoryTool) executeSave(args map[string]any) (*agent.ToolResult, error)
 func (t *MemoryTool) executeLoad(args map[string]any) (*agent.ToolResult, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
-		return nil, fmt.Errorf("query is required for load action")
+		return nil, fmt.Errorf(`query is required for load action. Example: {"action": "load", "query": "search terms"}`)
 	}
 
 	limit := 10
@@ -177,7 +177,7 @@ func (t *MemoryTool) executeLoad(args map[string]any) (*agent.ToolResult, error)
 func (t *MemoryTool) executeDelete(args map[string]any) (*agent.ToolResult, error) {
 	idsStr, _ := args["ids"].(string)
 	if idsStr == "" {
-		return nil, fmt.Errorf("ids is required for delete action (comma-separated document IDs)")
+		return nil, fmt.Errorf(`ids is required for delete action. Example: {"action": "delete", "ids": "doc-id-1,doc-id-2"}`)
 	}
 
 	ids := strings.Split(idsStr, ",")
@@ -203,7 +203,7 @@ func (t *MemoryTool) executeDelete(args map[string]any) (*agent.ToolResult, erro
 func (t *MemoryTool) executeForget(args map[string]any) (*agent.ToolResult, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
-		return nil, fmt.Errorf("query is required for forget action")
+		return nil, fmt.Errorf(`query is required for forget action. Example: {"action": "forget", "query": "what to forget"}`)
 	}
 
 	results, err := search.Search(query, 50)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/expki/ZeroLoop.git/database"
 	"github.com/expki/ZeroLoop.git/filemanager"
+	"github.com/expki/ZeroLoop.git/llm"
 	"github.com/expki/ZeroLoop.git/logger"
 	"github.com/expki/ZeroLoop.git/models"
 	"github.com/expki/ZeroLoop.git/search"
@@ -60,6 +61,9 @@ func RegisterRoutes(mux *http.ServeMux, hub *Hub, fm *filemanager.FileManager) {
 	})
 	mux.HandleFunc("GET /api/health/llm", func(w http.ResponseWriter, r *http.Request) {
 		llmHealth(w, r, hub)
+	})
+	mux.HandleFunc("POST /api/completions", func(w http.ResponseWriter, r *http.Request) {
+		codeCompletion(w, r, hub)
 	})
 }
 
@@ -288,4 +292,49 @@ func llmHealth(w http.ResponseWriter, r *http.Request, hub *Hub) {
 		return
 	}
 	writeJSON(w, http.StatusOK, health)
+}
+
+func codeCompletion(w http.ResponseWriter, r *http.Request, hub *Hub) {
+	var req struct {
+		Prefix    string   `json:"prefix"`
+		Suffix    string   `json:"suffix"`
+		MaxTokens int      `json:"max_tokens"`
+		Stop      []string `json:"stop"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 256<<10) // 256KB limit
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Prefix == "" && req.Suffix == "" {
+		writeError(w, http.StatusBadRequest, "prefix or suffix is required")
+		return
+	}
+
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = 128
+	}
+	if req.MaxTokens > 512 {
+		req.MaxTokens = 512
+	}
+	if req.Stop == nil {
+		req.Stop = []string{"\n\n"}
+	}
+
+	infillReq := &llm.InfillRequest{
+		InputPrefix: req.Prefix,
+		InputSuffix: req.Suffix,
+		NPredict:    req.MaxTokens,
+		Temperature: 0.2,
+		Stop:        req.Stop,
+	}
+
+	resp, err := hub.llmClient.Infill(r.Context(), infillReq)
+	if err != nil {
+		logger.Log.Debugw("infill request failed", "error", err)
+		writeJSON(w, http.StatusOK, map[string]string{"text": ""})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"text": resp.Content})
 }

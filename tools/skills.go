@@ -115,7 +115,7 @@ func (t *SkillsTool) executeList() (*agent.ToolResult, error) {
 func (t *SkillsTool) executeLoad(a *agent.Agent, args map[string]any) (*agent.ToolResult, error) {
 	name, _ := args["name"].(string)
 	if name == "" {
-		return nil, fmt.Errorf("name is required for load method")
+		return nil, fmt.Errorf(`name is required for load method. Example: {"method": "load", "name": "skill_name"}`)
 	}
 
 	// Check loaded skills limit

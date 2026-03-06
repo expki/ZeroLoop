@@ -31,7 +31,7 @@ func (t *ResponseTool) Parameters() any {
 func (t *ResponseTool) Execute(ctx context.Context, a *agent.Agent, args map[string]any) (*agent.ToolResult, error) {
 	message, _ := args["message"].(string)
 	if message == "" {
-		return nil, fmt.Errorf("response message is required")
+		return nil, fmt.Errorf(`response message is required. Example: {"message": "your response text here"}`)
 	}
 	return &agent.ToolResult{
 		Message:   message,

@@ -43,7 +43,7 @@ func (t *NotifyUserTool) Execute(ctx context.Context, a *agent.Agent, args map[s
 	detail, _ := args["detail"].(string)
 
 	if title == "" {
-		return nil, fmt.Errorf("title is required")
+		return nil, fmt.Errorf(`title is required. Example: {"type": "info", "title": "Status Update"}`)
 	}
 
 	// Map notification type to log entry type
