@@ -65,10 +65,27 @@ export interface ArboristNode {
   children?: ArboristNode[]
 }
 
+export interface Process {
+  id: string
+  project_id: string
+  command: string
+  status: 'running' | 'exited' | 'stopped'
+  exit_code?: number
+  started_at: string
+  exited_at?: string
+}
+
+export interface ProcessLogLine {
+  timestamp: string
+  stream: 'stdout' | 'stderr'
+  text: string
+}
+
 export type MainView =
   | { type: 'agent' }
   | { type: 'terminal' }
   | { type: 'editor' }
+  | { type: 'process' }
 
 export type DetailMode = 'collapsed' | 'list' | 'current' | 'expanded'
 export type AgentWidth = '40em' | '55em' | '80em' | 'full'

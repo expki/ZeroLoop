@@ -1,4 +1,4 @@
-import type { Agent, Message, Project, ProjectFile, Terminal } from '../types'
+import type { Agent, Message, Process, ProcessLogLine, Project, ProjectFile, Terminal } from '../types'
 
 const API_BASE = '/api'
 
@@ -138,6 +138,18 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ name }),
     }),
+
+  // Process endpoints
+  listProcesses: (projectId: string) =>
+    request<Process[]>(`/processes?project_id=${projectId}`),
+
+  getProcessLog: (processId: string, tail?: number) =>
+    request<{ process: Process; lines: ProcessLogLine[] }>(
+      `/processes/${processId}/log${tail ? `?tail=${tail}` : ''}`
+    ),
+
+  stopProcess: (processId: string) =>
+    request<{ status: string }>(`/processes/${processId}/stop`, { method: 'POST' }),
 
   searchProjectFiles: (projectId: string, query: string, max?: number) =>
     request<{ path: string; line: number; column: number; content: string }[]>(

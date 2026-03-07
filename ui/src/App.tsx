@@ -2,12 +2,14 @@ import { useEffect } from 'react'
 import { useUIStore } from './stores/uiStore'
 import { useAgentStore } from './stores/agentStore'
 import { useTerminalStore } from './stores/terminalStore'
+import { useProcessStore } from './stores/processStore'
 import { useProjectStore } from './stores/projectStore'
 import { ws } from './services/websocket'
 import ProjectList from './components/ProjectList'
 import ProjectSidebar from './components/ProjectSidebar'
 import AgentArea from './components/AgentArea'
 import TerminalArea from './components/TerminalArea'
+import ProcessArea from './components/ProcessArea'
 import MonacoIDE from './components/MonacoIDE'
 import WelcomeScreen from './components/WelcomeScreen'
 import './App.css'
@@ -20,13 +22,16 @@ function App() {
   const mainView = useProjectStore((s) => s.mainView)
   const selectedAgentId = useAgentStore((s) => s.selectedAgentId)
   const selectedTerminalId = useTerminalStore((s) => s.selectedTerminalId)
+  const selectedProcessId = useProcessStore((s) => s.selectedProcessId)
   const initAgent = useAgentStore((s) => s.init)
   const initTerminal = useTerminalStore((s) => s.init)
+  const initProcess = useProcessStore((s) => s.init)
   const initProject = useProjectStore((s) => s.init)
 
   useEffect(() => {
     initAgent()
     initTerminal()
+    initProcess()
     initProject()
 
     const unsub = ws.on('_status', (payload: { status: string }) => {
@@ -36,7 +41,7 @@ function App() {
     })
 
     return unsub
-  }, [initAgent, initTerminal, initProject])
+  }, [initAgent, initTerminal, initProcess, initProject])
 
   // No project selected: show project list
   if (!selectedProjectId) {
@@ -53,6 +58,8 @@ function App() {
     mainContent = <MonacoIDE />
   } else if (mainView.type === 'terminal' && selectedTerminalId) {
     mainContent = <TerminalArea />
+  } else if (mainView.type === 'process' && selectedProcessId) {
+    mainContent = <ProcessArea />
   } else if (selectedAgentId) {
     mainContent = <AgentArea />
   } else {

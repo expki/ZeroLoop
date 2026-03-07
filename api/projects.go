@@ -127,6 +127,9 @@ func deleteProject(w http.ResponseWriter, r *http.Request, hub *Hub, fm *fileman
 	}
 	projectName := project.Name
 
+	// Stop all running processes for this project
+	hub.processManager.StopAll(id)
+
 	// Clean up agents for all agents in this project
 	var agts []models.Agent
 	db.Where("project_id = ?", id).Select("id").Find(&agts)

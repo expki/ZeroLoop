@@ -47,13 +47,14 @@ func mustMarshal(v any) []byte {
 
 // Client represents a single WebSocket connection
 type Client struct {
-	hub       *Hub
-	conn      *websocket.Conn
-	send      chan []byte
-	agentID   string
-	projectID string
-	mu        sync.Mutex
-	closed    bool
+	hub               *Hub
+	conn              *websocket.Conn
+	send              chan []byte
+	agentID           string
+	projectID         string
+	subscribedProcess string // tracks which process this client is viewing
+	mu                sync.Mutex
+	closed            bool
 }
 
 // safeSend sends data to the client's send channel without panicking if it's closed.
@@ -86,6 +87,7 @@ type Hub struct {
 	fileManager     *filemanager.FileManager
 	tools           *agent.ToolRegistry
 	terminalManager *TerminalManager
+	processManager  *ProcessManager
 }
 
 // NewHub creates a new Hub
@@ -108,7 +110,7 @@ func NewHub(llmClient *llm.Client, fm *filemanager.FileManager) *Hub {
 	registry.Register(&tools.BehaviourAdjustmentTool{})
 	registry.Register(&tools.VisionTool{})
 
-	return &Hub{
+	h := &Hub{
 		clients:        make(map[*Client]bool),
 		register:       make(chan *Client),
 		unregister:     make(chan *Client),
@@ -121,7 +123,117 @@ func NewHub(llmClient *llm.Client, fm *filemanager.FileManager) *Hub {
 		fileManager:     fm,
 		tools:           registry,
 		terminalManager: NewTerminalManager(),
+		processManager:  NewProcessManager(),
 	}
+
+	// Start process cleanup loop
+	h.processManager.startCleanupLoop()
+
+	// Register process tools with closures that capture the hub
+	registry.Register(&tools.RunProcessTool{
+		Starter: func(projectID, command, workDir string) (string, <-chan struct{}, error) {
+			processID := GenerateProcessID()
+			sess, err := h.processManager.Start(processID, projectID, command, workDir,
+				// onOutput: send to subscribed clients only
+				func(pid string, line LogLine) {
+					outData, _ := json.Marshal(map[string]any{
+						"process_id": pid,
+						"stream":     line.Stream,
+						"text":       line.Text,
+						"timestamp":  line.Timestamp,
+					})
+					h.mu.RLock()
+					for client := range h.clients {
+						if client.subscribedProcess == pid {
+							client.safeSend(mustMarshal(WSMessage{Type: "process_output", Payload: outData}))
+						}
+					}
+					h.mu.RUnlock()
+				},
+				// onExit: broadcast to project
+				func(pid string, exitCode int) {
+					exitData, _ := json.Marshal(map[string]any{
+						"process_id": pid,
+						"exit_code":  exitCode,
+					})
+					h.broadcastToProject(projectID, WSMessage{Type: "process_exit", Payload: exitData})
+				},
+			)
+			if err != nil {
+				return "", nil, err
+			}
+			// Broadcast process_started to project
+			startData, _ := json.Marshal(map[string]any{
+				"process_id": processID,
+				"project_id": projectID,
+				"command":    command,
+			})
+			h.broadcastToProject(projectID, WSMessage{Type: "process_started", Payload: startData})
+			return processID, sess.done, nil
+		},
+		Checker: func(processID string, tailLines int) (*tools.ProcessCheckResult, error) {
+			sess, ok := h.processManager.Get(processID)
+			if !ok {
+				return nil, fmt.Errorf("process %s not found", processID)
+			}
+			info := sess.info()
+			tailOutput := sess.buffer.Tail(tailLines)
+			outputLines := make([]tools.ProcessOutputLine, len(tailOutput))
+			for i, l := range tailOutput {
+				outputLines[i] = tools.ProcessOutputLine{
+					Stream: l.Stream,
+					Text:   l.Text,
+				}
+			}
+			return &tools.ProcessCheckResult{
+				ID:       info.ID,
+				Command:  info.Command,
+				Status:   info.Status,
+				ExitCode: info.ExitCode,
+				Lines:    outputLines,
+			}, nil
+		},
+	})
+
+	registry.Register(&tools.CheckProcessTool{
+		Checker: func(processID string, tailLines int) (*tools.ProcessCheckResult, error) {
+			sess, ok := h.processManager.Get(processID)
+			if !ok {
+				return nil, fmt.Errorf("process %s not found", processID)
+			}
+			info := sess.info()
+			tailOutput := sess.buffer.Tail(tailLines)
+			lines := make([]tools.ProcessOutputLine, len(tailOutput))
+			for i, l := range tailOutput {
+				lines[i] = tools.ProcessOutputLine{Stream: l.Stream, Text: l.Text}
+			}
+			return &tools.ProcessCheckResult{
+				ID:       info.ID,
+				Command:  info.Command,
+				Status:   info.Status,
+				ExitCode: info.ExitCode,
+				Lines:    lines,
+			}, nil
+		},
+	})
+
+	registry.Register(&tools.ListProcessesTool{
+		Lister: func(projectID string) []tools.ProcessListItem {
+			infos := h.processManager.ListByProject(projectID)
+			items := make([]tools.ProcessListItem, len(infos))
+			for i, info := range infos {
+				items[i] = tools.ProcessListItem{
+					ID:       info.ID,
+					Command:  info.Command,
+					Status:   info.Status,
+					ExitCode: info.ExitCode,
+				}
+			}
+			return items
+		},
+	})
+
+	return h
 }
 
 // Run starts the hub event loop
@@ -411,6 +523,51 @@ func (c *Client) handleMessage(msg WSMessage) {
 		json.Unmarshal(msg.Payload, &payload)
 		if payload.TerminalID != "" {
 			_ = c.hub.terminalManager.Resize(payload.TerminalID, payload.Cols, payload.Rows)
+		}
+
+	case "process_subscribe":
+		var payload struct {
+			ProcessID string `json:"process_id"`
+		}
+		json.Unmarshal(msg.Payload, &payload)
+		if payload.ProcessID == "" {
+			return
+		}
+		// Guard against duplicate subscribe
+		c.mu.Lock()
+		if c.subscribedProcess == payload.ProcessID {
+			c.mu.Unlock()
+			return
+		}
+		c.subscribedProcess = payload.ProcessID
+		c.mu.Unlock()
+
+		sess, ok := c.hub.processManager.Get(payload.ProcessID)
+		if !ok {
+			return
+		}
+		// Send buffered log history
+		lines := sess.buffer.Lines()
+		for _, line := range lines {
+			outData, _ := json.Marshal(map[string]any{
+				"process_id": payload.ProcessID,
+				"stream":     line.Stream,
+				"text":       line.Text,
+				"timestamp":  line.Timestamp,
+			})
+			c.safeSend(mustMarshal(WSMessage{Type: "process_output", Payload: outData}))
+		}
+		// Send current process info
+		infoData, _ := json.Marshal(sess.info())
+		c.safeSend(mustMarshal(WSMessage{Type: "process_info", Payload: infoData}))
+
+	case "process_stop":
+		var payload struct {
+			ProcessID string `json:"process_id"`
+		}
+		json.Unmarshal(msg.Payload, &payload)
+		if payload.ProcessID != "" {
+			go c.hub.processManager.Stop(payload.ProcessID)
 		}
 	}
 }

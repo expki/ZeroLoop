@@ -62,7 +62,7 @@ type CodeExecutionTool struct{}
 func (t *CodeExecutionTool) Name() string { return "code_execution" }
 
 func (t *CodeExecutionTool) Description() string {
-	return "Execute terminal commands, Python, or Node.js code. Sessions preserve working directory and environment across calls. Use 'session' to select session number (0 default), 'reset' to clear session state."
+	return "Execute short-lived terminal commands, Python, or Node.js code. Has a 2-minute timeout. Sessions preserve working directory and environment across calls. Use 'session' to select session number (0 default), 'reset' to clear session state. IMPORTANT: Do NOT use this for long-running processes like servers, watchers, or build tasks — use the run_process tool instead, which runs processes in the background with live output streaming."
 }
 
 func (t *CodeExecutionTool) Parameters() any {

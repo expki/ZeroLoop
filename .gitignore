@@ -1,8 +1,5 @@
 *.db*
 *.search/
-*.md
-!README.md
-!CLAUDE.md
 .sisyphus/
 .omc/
 zeroloop*

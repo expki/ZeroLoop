@@ -1,0 +1,174 @@
+.process-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-bg-primary);
+}
+
+.process-area .topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.process-status-badge {
+  font-size: var(--font-size-xs);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.process-status-badge.running {
+  background: rgba(46, 204, 113, 0.15);
+  color: #2ecc71;
+}
+
+.process-status-badge.exited {
+  background: rgba(149, 165, 166, 0.15);
+  color: #95a5a6;
+}
+
+.process-status-badge.stopped {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+}
+
+.process-stop-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid rgba(231, 76, 60, 0.4);
+  border-radius: 6px;
+  background: rgba(231, 76, 60, 0.1);
+  color: #e74c3c;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  transition: background 0.15s;
+}
+
+.process-stop-btn:hover {
+  background: rgba(231, 76, 60, 0.2);
+}
+
+.process-log-wrapper {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.process-log-container {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.process-log-empty {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  padding: var(--spacing-lg);
+  text-align: center;
+}
+
+.process-log-line {
+  display: inline;
+}
+
+.process-log-line.stdout {
+  color: var(--color-text-primary);
+}
+
+.process-log-line.stderr {
+  color: #e74c3c;
+}
+
+.process-scroll-btn {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.process-scroll-btn:hover {
+  background: var(--color-bg-tertiary, var(--color-bg-secondary));
+}
+
+/* Sidebar process list items */
+.process-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.process-list-empty {
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.process-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  transition: background 0.1s;
+}
+
+.process-item:hover {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.process-item.active {
+  background: var(--color-bg-active, rgba(255, 255, 255, 0.08));
+}
+
+.process-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #95a5a6;
+  flex-shrink: 0;
+}
+
+.process-status-dot.running {
+  background: #2ecc71;
+}
+
+.process-status-dot.stopped {
+  background: #e74c3c;
+}
+
+.process-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.process-close {
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.process-item:hover .process-close {
+  opacity: 1;
+}

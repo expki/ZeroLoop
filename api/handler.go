@@ -77,6 +77,17 @@ func RegisterRoutes(mux *http.ServeMux, hub *Hub, fm *filemanager.FileManager) {
 	})
 	mux.HandleFunc("PATCH /api/terminals/{id}", renameTerminal)
 
+	// Process routes
+	mux.HandleFunc("GET /api/processes", func(w http.ResponseWriter, r *http.Request) {
+		listProcesses(w, r, hub.processManager)
+	})
+	mux.HandleFunc("GET /api/processes/{id}/log", func(w http.ResponseWriter, r *http.Request) {
+		getProcessLog(w, r, hub.processManager)
+	})
+	mux.HandleFunc("POST /api/processes/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		stopProcess(w, r, hub.processManager)
+	})
+
 	mux.HandleFunc("GET /api/health/llm", func(w http.ResponseWriter, r *http.Request) {
 		llmHealth(w, r, hub)
 	})

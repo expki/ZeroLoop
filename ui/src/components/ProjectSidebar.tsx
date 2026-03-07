@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useProjectStore } from '../stores/projectStore'
 import { useAgentStore } from '../stores/agentStore'
 import { useTerminalStore } from '../stores/terminalStore'
+import { useProcessStore } from '../stores/processStore'
 import { useUIStore } from '../stores/uiStore'
 import ArboristFileTree from './ArboristFileTree'
 import type { AgentWidth, DetailMode } from '../types'
@@ -12,6 +13,7 @@ function ProjectSidebar() {
   const { selectedProjectId, selectProject, projects, loadFiles } = useProjectStore()
   const { agents, selectedAgentId, selectAgent, createAgent, deleteAgent, loadAgentsForProject } = useAgentStore()
   const { terminals, selectedTerminalId, selectTerminal, createTerminal, deleteTerminal, loadTerminalsForProject } = useTerminalStore()
+  const { processes, selectedProcessId, selectProcess, stopProcess, loadProcessesForProject } = useProcessStore()
   const {
     sidebarOpen, toggleSidebar, theme, toggleTheme,
     agentWidth, setAgentWidth, detailMode, setDetailMode, setSidebarOpen,
@@ -25,9 +27,10 @@ function ProjectSidebar() {
     if (selectedProjectId) {
       loadAgentsForProject(selectedProjectId)
       loadTerminalsForProject(selectedProjectId)
+      loadProcessesForProject(selectedProjectId)
       loadFiles(selectedProjectId)
     }
-  }, [selectedProjectId, loadAgentsForProject, loadTerminalsForProject, loadFiles])
+  }, [selectedProjectId, loadAgentsForProject, loadTerminalsForProject, loadProcessesForProject, loadFiles])
 
   const handleSelectAgent = (id: string) => {
     selectAgent(id)
@@ -56,6 +59,14 @@ function ProjectSidebar() {
     if (selectedProjectId) {
       createTerminal(selectedProjectId)
       useProjectStore.getState().setMainView({ type: 'terminal' })
+    }
+  }
+
+  const handleSelectProcess = (id: string) => {
+    selectProcess(id)
+    useProjectStore.getState().setMainView({ type: 'process' })
+    if (window.innerWidth < 768) {
+      setSidebarOpen(false)
     }
   }
 
@@ -127,6 +138,38 @@ function ProjectSidebar() {
                 >
                   <span className="material-symbols-outlined">close</span>
                 </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Processes section */}
+      <div className="sidebar-section">
+        <div className="sidebar-section-header">
+          <span className="sidebar-section-title">Processes</span>
+        </div>
+        <div className="process-list">
+          {processes.length === 0 ? (
+            <div className="process-list-empty">No processes yet</div>
+          ) : (
+            processes.map((process) => (
+              <div
+                key={process.id}
+                className={`process-item ${selectedProcessId === process.id ? 'active' : ''}`}
+                onClick={() => handleSelectProcess(process.id)}
+              >
+                <div className={`process-status-dot ${process.status === 'running' ? 'running' : process.status === 'stopped' ? 'stopped' : ''}`} />
+                <span className="process-name">{process.command}</span>
+                {process.status === 'running' && (
+                  <button
+                    className="process-close icon-button"
+                    onClick={(e) => { e.stopPropagation(); stopProcess(process.id) }}
+                    title="Stop process"
+                  >
+                    <span className="material-symbols-outlined">stop</span>
+                  </button>
+                )}
               </div>
             ))
           )}
