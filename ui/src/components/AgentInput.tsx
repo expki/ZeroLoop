@@ -6,25 +6,31 @@ function AgentInput() {
   const [input, setInput] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendMessage = useAgentStore((s) => s.sendMessage)
+  const intervene = useAgentStore((s) => s.intervene)
   const paused = useAgentStore((s) => s.paused)
   const queueSize = useAgentStore((s) => s.queueSize)
   const togglePause = useAgentStore((s) => s.togglePause)
   const cancelAgent = useAgentStore((s) => s.cancelAgent)
   const clearAgent = useAgentStore((s) => s.clearAgent)
   const exportAgent = useAgentStore((s) => s.exportAgent)
-  const isRunning = useAgentStore((s) => {
-    const agent = s.agents.find((a) => a.id === s.selectedAgentId)
-    return agent?.running ?? false
-  })
+  const selectedAgent = useAgentStore((s) => s.agents.find((a) => a.id === s.selectedAgentId))
+  const isRunning = selectedAgent?.running ?? false
+  const isAutomated = selectedAgent?.type === 'automated'
+  const isInfinite = selectedAgent?.mode === 'infinite'
 
   const handleSend = useCallback(() => {
     if (!input.trim()) return
-    sendMessage(input)
+    // Automated agents use intervene when running, sendMessage otherwise
+    if (isAutomated && isRunning) {
+      intervene(input)
+    } else {
+      sendMessage(input)
+    }
     setInput('')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
-  }, [input, sendMessage])
+  }, [input, sendMessage, intervene, isAutomated, isRunning])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -46,7 +52,7 @@ function AgentInput() {
         <textarea
           ref={textareaRef}
           className="agent-textarea"
-          placeholder="Type a message..."
+          placeholder={isAutomated && isRunning ? 'Inject message...' : 'Type a message...'}
           value={input}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
@@ -62,23 +68,25 @@ function AgentInput() {
         </button>
       </div>
       <div className="input-actions">
-        <button
-          className="action-btn"
-          onClick={togglePause}
-          disabled={!paused && !isRunning}
-        >
-          <span className="material-symbols-outlined">
-            {paused ? 'play_arrow' : 'pause'}
-          </span>
-          <span className="action-label">{paused ? 'Resume' : 'Pause'}</span>
-        </button>
+        {!isAutomated && (
+          <button
+            className="action-btn"
+            onClick={togglePause}
+            disabled={!paused && !isRunning}
+          >
+            <span className="material-symbols-outlined">
+              {paused ? 'play_arrow' : 'pause'}
+            </span>
+            <span className="action-label">{paused ? 'Resume' : 'Pause'}</span>
+          </button>
+        )}
         <button
           className="action-btn action-btn-cancel"
           onClick={cancelAgent}
           disabled={!isRunning && !paused}
         >
-          <span className="material-symbols-outlined">cancel</span>
-          <span className="action-label">Cancel</span>
+          <span className="material-symbols-outlined">{isInfinite ? 'stop' : 'cancel'}</span>
+          <span className="action-label">{isInfinite ? 'Stop' : 'Cancel'}</span>
         </button>
         {queueSize > 0 && (
           <span className="queue-indicator">

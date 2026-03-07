@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/expki/ZeroLoop.git/agent"
+	"github.com/expki/ZeroLoop.git/config"
 	"github.com/expki/ZeroLoop.git/database"
 	"github.com/expki/ZeroLoop.git/filemanager"
 	"github.com/expki/ZeroLoop.git/llm"
@@ -83,6 +84,9 @@ type Hub struct {
 	agentToProject map[string]string             // agentID -> projectID cache
 	queues         map[string][]string           // agentID -> queued user messages
 	queueMu        sync.Mutex
+	childAgents    map[string][]string           // parentID -> []childAgentID
+	childCancels   map[string]context.CancelFunc // childAgentID -> cancel
+	llmSemaphore   chan struct{}                  // limits concurrent LLM calls
 	llmClient       *llm.Client
 	fileManager     *filemanager.FileManager
 	tools           *agent.ToolRegistry
@@ -110,6 +114,13 @@ func NewHub(llmClient *llm.Client, fm *filemanager.FileManager) *Hub {
 	registry.Register(&tools.BehaviourAdjustmentTool{})
 	registry.Register(&tools.VisionTool{})
 
+	// Initialize LLM semaphore from config
+	cfg := config.Get()
+	var llmSem chan struct{}
+	if cfg.LLMSlots > 0 {
+		llmSem = make(chan struct{}, cfg.LLMSlots)
+	}
+
 	h := &Hub{
 		clients:        make(map[*Client]bool),
 		register:       make(chan *Client),
@@ -119,6 +130,9 @@ func NewHub(llmClient *llm.Client, fm *filemanager.FileManager) *Hub {
 		counters:       make(map[string]*atomic.Int64),
 		agentToProject: make(map[string]string),
 		queues:         make(map[string][]string),
+		childAgents:    make(map[string][]string),
+		childCancels:   make(map[string]context.CancelFunc),
+		llmSemaphore:   llmSem,
 		llmClient:       llmClient,
 		fileManager:     fm,
 		tools:           registry,
@@ -413,16 +427,30 @@ func (c *Client) handleMessage(msg WSMessage) {
 		if payload.AgentID == "" || payload.Content == "" {
 			return
 		}
+
+		// Reject messages to child agents (they are managed by the orchestrator)
+		var parentCheck models.Agent
+		if err := database.Get().Select("parent_id").First(&parentCheck, "id = ?", payload.AgentID).Error; err == nil && parentCheck.ParentID != nil {
+			logger.Log.Debugw("rejecting message to child agent", "agent_id", payload.AgentID)
+			return
+		}
+
 		c.mu.Lock()
 		c.agentID = payload.AgentID
 		c.mu.Unlock()
 
-		// If agent is already running, queue the message instead of canceling
+		// If agent is already running, check if it's automated (inject via intervene) or queue
 		c.hub.agentMu.Lock()
 		_, isRunning := c.hub.cancels[payload.AgentID]
+		agentInstance, hasAgent := c.hub.agents[payload.AgentID]
 		c.hub.agentMu.Unlock()
 		if isRunning {
-			c.hub.queueMessage(payload.AgentID, payload.Content)
+			// For automated agents, inject as intervention instead of queueing
+			if hasAgent && agentInstance.Type == "automated" {
+				c.hub.handleIntervene(payload.AgentID, payload.Content)
+			} else {
+				c.hub.queueMessage(payload.AgentID, payload.Content)
+			}
 		} else {
 			go c.hub.handleSendMessage(payload.AgentID, payload.Content)
 		}
@@ -654,6 +682,88 @@ func (h *Hub) createLogCallback(agentID string, counter *atomic.Int64) agent.Log
 	}
 }
 
+// createChildLogCallback creates a log callback for orchestrator child agents.
+// Messages are saved under the child's AgentID but broadcast to the parent's WS subscribers.
+func (h *Hub) createChildLogCallback(childAgentID, parentAgentID string, counter *atomic.Int64) agent.LogCallback {
+	return func(entry agent.LogEntry) {
+		var msgType models.MessageType
+		switch entry.Type {
+		case "agent":
+			msgType = models.MessageTypeAgent
+		case "response":
+			msgType = models.MessageTypeResponse
+		case "tool":
+			msgType = models.MessageTypeTool
+		case "code_exe":
+			msgType = models.MessageTypeCodeExe
+		case "error":
+			msgType = models.MessageTypeError
+		case "info":
+			msgType = models.MessageTypeInfo
+		default:
+			msgType = models.MessageType(entry.Type)
+		}
+
+		if entry.Stream {
+			streamData, _ := json.Marshal(map[string]any{
+				"agent_id":       parentAgentID,
+				"child_agent_id": childAgentID,
+				"type":           entry.Type,
+				"content":        entry.Content,
+				"agentno":        entry.AgentNo,
+				"stream":         true,
+			})
+			h.broadcast(parentAgentID, WSMessage{Type: "stream", Payload: streamData})
+			return
+		}
+
+		no := int(counter.Add(1))
+		kvpsJSON := "{}"
+		if entry.Kvps != nil {
+			if b, err := json.Marshal(entry.Kvps); err == nil {
+				kvpsJSON = string(b)
+			}
+		}
+
+		msg := models.Message{
+			ID:      uuid.New().String(),
+			AgentID: childAgentID,
+			No:      no,
+			Type:    msgType,
+			Heading: entry.Heading,
+			Content: entry.Content,
+			Kvps:    kvpsJSON,
+			AgentNo: entry.AgentNo,
+		}
+		database.Get().Create(&msg)
+
+		if entry.Content != "" {
+			_ = search.Index(search.Document{
+				ID:      msg.ID,
+				AgentID: childAgentID,
+				Content: entry.Content,
+				Type:    string(msgType),
+				Heading: entry.Heading,
+			})
+		}
+
+		// Broadcast to parent's subscribers with child_agent_id field
+		childMsgData, _ := json.Marshal(map[string]any{
+			"id":             msg.ID,
+			"agent_id":       parentAgentID,
+			"child_agent_id": childAgentID,
+			"no":             msg.No,
+			"type":           msg.Type,
+			"heading":        msg.Heading,
+			"content":        msg.Content,
+			"kvps":           msg.Kvps,
+			"agentno":        msg.AgentNo,
+			"timestamp":      msg.CreatedAt,
+		})
+		h.broadcast(parentAgentID, WSMessage{Type: "child_message", Payload: childMsgData})
+	}
+}
+
 // queueMessage saves a user message to the DB, broadcasts it, and adds it to the in-memory queue.
 func (h *Hub) queueMessage(agentID, content string) {
 	db := database.Get()
@@ -725,6 +835,10 @@ func (h *Hub) handleCancel(agentID string) {
 		return
 	}
 
+	// Collect child IDs under lock, then cancel them after releasing
+	childIDs := make([]string, len(h.childAgents[agentID]))
+	copy(childIDs, h.childAgents[agentID])
+
 	// Set cancelled flag BEFORE canceling so the agent returns ErrCancelled
 	if hasAgent {
 		agentInstance.SetCancelled(true)
@@ -734,12 +848,42 @@ func (h *Hub) handleCancel(agentID string) {
 	delete(h.cancels, agentID)
 	h.agentMu.Unlock()
 
+	// Cancel all child agents outside the lock
+	for _, childID := range childIDs {
+		h.cancelChildAgent(childID)
+	}
+
+	// Clean up child tracking
+	h.agentMu.Lock()
+	delete(h.childAgents, agentID)
+	h.agentMu.Unlock()
+
 	// Update DB and broadcast cancelled state
 	db := database.Get()
-	db.Model(&models.Agent{}).Where("id = ?", agentID).Update("running", false)
+	db.Model(&models.Agent{}).Where("id = ?", agentID).Updates(map[string]any{"running": false, "status": models.AgentStatusFailed})
+	// Also mark child agents in DB
+	if len(childIDs) > 0 {
+		db.Model(&models.Agent{}).Where("id IN ?", childIDs).Updates(map[string]any{"running": false, "status": models.AgentStatusFailed})
+	}
 
 	updateData, _ := json.Marshal(map[string]any{"id": agentID, "running": false, "paused": false, "queue_size": 0})
 	h.broadcast(agentID, WSMessage{Type: "chat_update", Payload: updateData})
+}
+
+// cancelChildAgent cancels a single child agent's in-memory state without touching the parent's childAgents map.
+func (h *Hub) cancelChildAgent(childID string) {
+	h.agentMu.Lock()
+	if childInstance, ok := h.agents[childID]; ok {
+		childInstance.SetCancelled(true)
+		childInstance.CancelTools()
+	}
+	if childCancel, ok := h.cancels[childID]; ok {
+		childCancel()
+		delete(h.cancels, childID)
+	}
+	delete(h.agents, childID)
+	delete(h.counters, childID)
+	h.agentMu.Unlock()
 }
 
 func (h *Hub) handleSendMessage(agentID, content string) {
@@ -797,6 +941,56 @@ func (h *Hub) handleSendMessage(agentID, content string) {
 		agentInstance.OnLog = h.createLogCallback(agentID, counter)
 	}
 
+	// Set type/mode from DB record
+	agentInstance.Type = string(agt.Type)
+	agentInstance.Mode = string(agt.Mode)
+	agentInstance.LLMSemaphore = h.llmSemaphore
+
+	// Set up orchestrator child spawner
+	if agt.Mode == models.AgentModeOrchestrator {
+		parentID := agentID
+		agentInstance.ChildSpawner = func(task string) (*agent.Agent, string, error) {
+			childID := uuid.New().String()
+			childAgt := models.Agent{
+				ID:        childID,
+				ProjectID: agt.ProjectID,
+				Name:      task,
+				Type:      models.AgentTypeStandard,
+				Mode:      models.AgentModeDirect,
+				Status:    models.AgentStatusRunning,
+				ParentID:  &parentID,
+			}
+			if err := database.Get().Create(&childAgt).Error; err != nil {
+				return nil, "", fmt.Errorf("failed to create child agent: %w", err)
+			}
+
+			// Track child
+			h.agentMu.Lock()
+			h.childAgents[parentID] = append(h.childAgents[parentID], childID)
+			h.agentMu.Unlock()
+
+			childCounter := &atomic.Int64{}
+			h.agentMu.Lock()
+			h.counters[childID] = childCounter
+			h.agentMu.Unlock()
+
+			childLogCb := h.createChildLogCallback(childID, parentID, childCounter)
+			child := agentInstance.NewChild(childID, childLogCb)
+
+			if agt.ProjectID != "" {
+				child.ProjectID = agt.ProjectID
+				child.ProjectDir = h.fileManager.ProjectDir(agt.ProjectID)
+				child.FileEventCallback = agentInstance.FileEventCallback
+			}
+
+			h.agentMu.Lock()
+			h.agents[childID] = child
+			h.agentMu.Unlock()
+
+			return child, childID, nil
+		}
+	}
+
 	// Set project context on agent if agent belongs to a project
 	if agt.ProjectID != "" {
 		agentInstance.ProjectID = agt.ProjectID
@@ -816,7 +1010,18 @@ func (h *Hub) handleSendMessage(agentID, content string) {
 	agentInstance.SetPaused(false)
 	agentInstance.SetCancelled(false)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// Per-mode context strategy
+	var ctx context.Context
+	var cancel context.CancelFunc
+	switch agt.Mode {
+	case models.AgentModeInfinite:
+		ctx, cancel = context.WithCancel(context.Background())
+	case models.AgentModeOneshot:
+		timeout := time.Duration(config.Get().OneshotTimeoutMin) * time.Minute
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	default:
+		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+	}
 	h.cancels[agentID] = cancel
 	h.agentMu.Unlock()
 
@@ -986,7 +1191,18 @@ func (h *Hub) handleResume(agentID string) {
 	// Refresh log callback with current counter
 	agentInstance.OnLog = h.createLogCallback(agentID, counter)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// Per-mode context strategy (matches handleSendMessage)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	switch models.AgentMode(agentInstance.Mode) {
+	case models.AgentModeInfinite:
+		ctx, cancel = context.WithCancel(context.Background())
+	case models.AgentModeOneshot:
+		timeout := time.Duration(config.Get().OneshotTimeoutMin) * time.Minute
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	default:
+		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+	}
 	h.cancels[agentID] = cancel
 	h.agentMu.Unlock()
 
@@ -1000,7 +1216,7 @@ func (h *Hub) handleResume(agentID string) {
 
 	// Mark agent as running
 	db := database.Get()
-	db.Model(&models.Agent{}).Where("id = ?", agentID).Update("running", true)
+	db.Model(&models.Agent{}).Where("id = ?", agentID).Updates(map[string]any{"running": true, "status": models.AgentStatusRunning})
 	chatUpdateData, _ := json.Marshal(map[string]any{"id": agentID, "running": true, "paused": false})
 	h.broadcast(agentID, WSMessage{Type: "chat_update", Payload: chatUpdateData})
 
@@ -1043,11 +1259,28 @@ func (h *Hub) handleResume(agentID string) {
 }
 
 func (h *Hub) handleClear(agentID string) {
-	// Cancel running agent and clean up state
+	// Cancel running agent and clean up state (including children)
 	h.cleanupAgent(agentID)
 
-	// Delete all messages for this agent
 	db := database.Get()
+
+	// Find child agents and delete their messages + search entries
+	var childIDs []string
+	db.Model(&models.Agent{}).Where("parent_id = ?", agentID).Pluck("id", &childIDs)
+	for _, childID := range childIDs {
+		var childMsgs []models.Message
+		db.Where("chat_id = ?", childID).Select("id").Find(&childMsgs)
+		for _, m := range childMsgs {
+			_ = search.Delete(m.ID)
+		}
+		db.Where("chat_id = ?", childID).Delete(&models.Message{})
+	}
+	// Delete child agent DB records
+	if len(childIDs) > 0 {
+		db.Where("parent_id = ?", agentID).Delete(&models.Agent{})
+	}
+
+	// Delete all messages for this agent
 	var msgs []models.Message
 	db.Where("chat_id = ?", agentID).Select("id").Find(&msgs)
 	for _, m := range msgs {
@@ -1089,11 +1322,16 @@ func (h *Hub) handleIntervene(agentID, content string) {
 }
 
 // cleanupAgent cancels any running agent and removes in-memory state for an agent session.
-// Does NOT broadcast to WS clients or touch the database.
+// Also cleans up any child agents. Does NOT broadcast to WS clients or touch the database.
 func (h *Hub) cleanupAgent(agentID string) {
 	h.clearQueue(agentID)
 
+	// Collect child IDs under lock, then clean them up after releasing
 	h.agentMu.Lock()
+	childIDs := make([]string, len(h.childAgents[agentID]))
+	copy(childIDs, h.childAgents[agentID])
+	delete(h.childAgents, agentID)
+
 	if agentInstance, ok := h.agents[agentID]; ok {
 		agentInstance.SetCancelled(true)
 		agentInstance.CancelTools()
@@ -1105,6 +1343,11 @@ func (h *Hub) cleanupAgent(agentID string) {
 	delete(h.agents, agentID)
 	delete(h.counters, agentID)
 	h.agentMu.Unlock()
+
+	// Cancel child agents outside the parent lock
+	for _, childID := range childIDs {
+		h.cancelChildAgent(childID)
+	}
 
 	// Best-effort slot erase to free server memory
 	eraseCtx, eraseCancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -56,6 +56,11 @@ type Config struct {
 
 	// Projects
 	ProjectsDir string
+
+	// Agent
+	LLMSlots            int // max concurrent LLM inference calls
+	OneshotTimeoutMin   int // timeout in minutes for oneshot agents
+	InfinitePauseSec    int // pause in seconds between infinite agent iterations
 }
 
 var cfg *Config
@@ -125,6 +130,11 @@ func Load() *Config {
 		ProjectsDir: must(getEnv("PROJECTS_DIR", func() string {
 			return filepath.Join(getBaseFolder(), "projects")
 		}())),
+
+		// Agent
+		LLMSlots:          must(getEnv("LLM_SLOTS", 1)),
+		OneshotTimeoutMin: must(getEnv("ONESHOT_TIMEOUT_MINUTES", 120)),
+		InfinitePauseSec:  must(getEnv("INFINITE_PAUSE_SECONDS", 5)),
 	}
 
 	return cfg

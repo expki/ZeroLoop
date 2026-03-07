@@ -69,6 +69,7 @@ func RegisterRoutes(mux *http.ServeMux, hub *Hub, fm *filemanager.FileManager) {
 	mux.HandleFunc("POST /api/agents/{id}/branch", func(w http.ResponseWriter, r *http.Request) {
 		branchAgent(w, r)
 	})
+	mux.HandleFunc("GET /api/agents/{id}/children", getAgentChildren)
 	// Terminal routes
 	mux.HandleFunc("GET /api/terminals", listTerminals)
 	mux.HandleFunc("POST /api/terminals", createTerminal)
@@ -116,6 +117,10 @@ func listAgents(w http.ResponseWriter, r *http.Request) {
 	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
 		query = query.Where("project_id = ?", projectID)
 	}
+	// By default hide child agents; pass ?include_children=true to include them
+	if r.URL.Query().Get("include_children") != "true" {
+		query = query.Where("parent_id IS NULL")
+	}
 	result := query.Find(&agents)
 	if result.Error != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch agents")
@@ -126,8 +131,10 @@ func listAgents(w http.ResponseWriter, r *http.Request) {
 
 func createAgent(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name      string `json:"name"`
-		ProjectID string `json:"project_id"`
+		Name      string           `json:"name"`
+		ProjectID string           `json:"project_id"`
+		Type      models.AgentType `json:"type"`
+		Mode      models.AgentMode `json:"mode"`
 	}
 	if r.Body != nil {
 		json.NewDecoder(r.Body).Decode(&req)
@@ -145,11 +152,28 @@ func createAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" {
 		req.Name = "New Agent"
 	}
+	// Default type/mode for backward compatibility
+	if req.Type == "" {
+		req.Type = models.AgentTypeStandard
+	}
+	if req.Mode == "" {
+		if req.Type == models.AgentTypeStandard {
+			req.Mode = models.AgentModeDirect
+		} else {
+			req.Mode = models.AgentModeOneshot
+		}
+	}
 
 	agt := models.Agent{
 		ID:        uuid.New().String(),
 		ProjectID: req.ProjectID,
 		Name:      req.Name,
+		Type:      req.Type,
+		Mode:      req.Mode,
+	}
+	if err := agt.ValidateTypeMode(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if err := database.Get().Create(&agt).Error; err != nil {
 		logger.Log.Errorw("failed to create agent", "error", err)
@@ -169,14 +193,37 @@ func getAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, agt)
 }
 
+func getAgentChildren(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var children []models.Agent
+	result := database.Get().Where("parent_id = ?", id).Order("created_at ASC").Find(&children)
+	if result.Error != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch children")
+		return
+	}
+	writeJSON(w, http.StatusOK, children)
+}
+
 func deleteAgent(w http.ResponseWriter, r *http.Request, hub *Hub) {
 	id := r.PathValue("id")
 
-	// Clean up in-memory agent/counter state without broadcasting
+	// Clean up in-memory agent/counter state (includes children)
 	hub.cleanupAgent(id)
 
-	// Clean up search index
 	db := database.Get()
+
+	// Clean up search index for child agent messages before cascade delete
+	var childIDs []string
+	db.Model(&models.Agent{}).Where("parent_id = ?", id).Pluck("id", &childIDs)
+	for _, childID := range childIDs {
+		var childMsgs []models.Message
+		db.Where("chat_id = ?", childID).Select("id").Find(&childMsgs)
+		for _, m := range childMsgs {
+			_ = search.Delete(m.ID)
+		}
+	}
+
+	// Clean up search index for parent agent messages
 	var msgs []models.Message
 	db.Where("chat_id = ?", id).Select("id").Find(&msgs)
 	for _, m := range msgs {
@@ -266,11 +313,13 @@ func branchAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create new branched agent
+	// Create new branched agent (preserving type/mode)
 	newAgt := models.Agent{
 		ID:        uuid.New().String(),
 		ProjectID: originalAgt.ProjectID,
 		Name:      originalAgt.Name + " (branch)",
+		Type:      originalAgt.Type,
+		Mode:      originalAgt.Mode,
 	}
 	if err := db.Create(&newAgt).Error; err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create branched agent")

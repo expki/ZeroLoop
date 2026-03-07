@@ -5,7 +5,7 @@ import { useTerminalStore } from '../stores/terminalStore'
 import { useProcessStore } from '../stores/processStore'
 import { useUIStore } from '../stores/uiStore'
 import ArboristFileTree from './ArboristFileTree'
-import type { AgentWidth, DetailMode } from '../types'
+import type { AgentType, AgentMode, AgentWidth, DetailMode } from '../types'
 import './Sidebar.css'
 import './ProjectSidebar.css'
 
@@ -19,6 +19,7 @@ function ProjectSidebar() {
     agentWidth, setAgentWidth, detailMode, setDetailMode, setSidebarOpen,
   } = useUIStore()
   const [prefsOpen, setPrefsOpen] = useState(false)
+  const [newAgentMenu, setNewAgentMenu] = useState(false)
 
   const project = projects.find((p) => p.id === selectedProjectId)
 
@@ -41,9 +42,14 @@ function ProjectSidebar() {
   }
 
   const handleNewAgent = () => {
+    setNewAgentMenu(!newAgentMenu)
+  }
+
+  const handleCreateAgent = (type: AgentType, mode: AgentMode) => {
     if (selectedProjectId) {
-      createAgent(selectedProjectId)
+      createAgent(selectedProjectId, type, mode)
       useProjectStore.getState().setMainView({ type: 'agent' })
+      setNewAgentMenu(false)
     }
   }
 
@@ -184,6 +190,26 @@ function ProjectSidebar() {
             <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>add</span>
           </button>
         </div>
+        {newAgentMenu && (
+          <div className="agent-create-menu">
+            <button className="agent-create-option" onClick={() => handleCreateAgent('standard', 'direct')}>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>chat</span>
+              <span>Direct Agent</span>
+            </button>
+            <button className="agent-create-option" onClick={() => handleCreateAgent('standard', 'orchestrator')}>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>hub</span>
+              <span>Orchestrator</span>
+            </button>
+            <button className="agent-create-option" onClick={() => handleCreateAgent('automated', 'oneshot')}>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>bolt</span>
+              <span>One-shot</span>
+            </button>
+            <button className="agent-create-option" onClick={() => handleCreateAgent('automated', 'infinite')}>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>all_inclusive</span>
+              <span>Infinite</span>
+            </button>
+          </div>
+        )}
         <div className="agent-list">
           {agents.length === 0 ? (
             <div className="agent-list-empty">No agents yet</div>
@@ -196,6 +222,7 @@ function ProjectSidebar() {
               >
                 <div className={`agent-status-dot ${agent.running ? 'running' : ''}`} />
                 <span className="agent-name">{agent.name}</span>
+                <span className="agent-mode-badge">{agent.mode || 'direct'}</span>
                 <button
                   className="agent-close icon-button"
                   onClick={(e) => { e.stopPropagation(); deleteAgent(agent.id) }}

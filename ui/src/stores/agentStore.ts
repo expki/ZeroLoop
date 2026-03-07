@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Agent, Message } from '../types'
+import type { Agent, AgentType, AgentMode, Message } from '../types'
 import { api } from '../services/api'
 import { ws } from '../services/websocket'
 
@@ -7,12 +7,13 @@ interface AgentState {
   agents: Agent[]
   selectedAgentId: string | null
   messages: Message[]
+  childMessages: Message[]
   loading: boolean
   paused: boolean
   queueSize: number
   initialized: boolean
   selectAgent: (id: string | null) => void
-  createAgent: (projectId: string) => void
+  createAgent: (projectId: string, type?: AgentType, mode?: AgentMode) => void
   deleteAgent: (id: string) => void
   renameAgent: (id: string, name: string) => void
   sendMessage: (content: string) => void
@@ -43,6 +44,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   agents: [],
   selectedAgentId: null,
   messages: [],
+  childMessages: [],
   loading: false,
   paused: false,
   queueSize: 0,
@@ -124,8 +126,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     ws.on('clear', (payload: { agent_id: string }) => {
       const state = get()
       if (payload.agent_id === state.selectedAgentId) {
-        set({ messages: [] })
+        set({ messages: [], childMessages: [] })
       }
+    })
+
+    // Handle child agent messages (from orchestrator children)
+    ws.on('child_message', (payload: Message & { child_agent_id?: string }) => {
+      const state = get()
+      if (payload.agent_id !== state.selectedAgentId) return
+
+      const msg: Message = {
+        ...payload,
+        kvps: parseKvps(payload.kvps),
+      }
+      set((s) => ({ childMessages: [...s.childMessages, msg] }))
     })
 
     // Handle connection status — UI store handles this in App.tsx
@@ -133,7 +147,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   selectAgent: async (id) => {
-    set({ selectedAgentId: id, messages: [], loading: !!id })
+    set({ selectedAgentId: id, messages: [], childMessages: [], loading: !!id })
 
     if (id) {
       // Subscribe to agent via WebSocket
@@ -155,13 +169,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  createAgent: async (projectId: string) => {
+  createAgent: async (projectId: string, type?: AgentType, mode?: AgentMode) => {
     try {
-      const agent = await api.createAgent(projectId)
+      const agent = await api.createAgent(projectId, undefined, type, mode)
       set((state) => ({
         agents: [agent, ...state.agents],
         selectedAgentId: agent.id,
         messages: [],
+        childMessages: [],
       }))
       ws.send('subscribe', { agent_id: agent.id })
     } catch (err) {
@@ -283,9 +298,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   loadAgentsForProject: async (projectId: string) => {
     try {
       const agents = await api.listAgents(projectId)
-      set({ agents: agents || [], selectedAgentId: null, messages: [] })
+      set({ agents: agents || [], selectedAgentId: null, messages: [], childMessages: [] })
     } catch {
-      set({ agents: [], selectedAgentId: null, messages: [] })
+      set({ agents: [], selectedAgentId: null, messages: [], childMessages: [] })
     }
   },
 }))

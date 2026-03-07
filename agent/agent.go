@@ -33,16 +33,28 @@ type LogEntry struct {
 // LogCallback is called when the agent produces log output
 type LogCallback func(entry LogEntry)
 
+// ChildSpawnFunc is called by the orchestrator to create and register child agents.
+// It receives the child's task description and returns the child Agent and its DB agent ID.
+type ChildSpawnFunc func(task string) (child *Agent, childAgentID string, err error)
+
 // Agent represents a single agent instance
 type Agent struct {
 	Number  int
 	AgentID string // identifies which agent session this agent belongs to
 	Profile string // agent profile name (default, developer, researcher, hacker)
+	Type    string // "standard" or "automated"
+	Mode    string // "direct", "orchestrator", "oneshot", "infinite"
 	History []llm.ChatMessage
 	Tools   *ToolRegistry
 	LLM     *llm.Client
 	OnLog   LogCallback
 	Parent  *Agent
+
+	// LLM concurrency limiter (nil = no limit)
+	LLMSemaphore chan struct{}
+
+	// Orchestrator child spawner (set by Hub for orchestrator mode)
+	ChildSpawner ChildSpawnFunc
 
 	// Project context (set when chat belongs to a project)
 	ProjectID         string                // project ID for scoping file operations
@@ -120,7 +132,7 @@ func New(llmClient *llm.Client, tools *ToolRegistry, onLog LogCallback) *Agent {
 	return a
 }
 
-// NewSubordinate creates a child agent
+// NewSubordinate creates a child agent (legacy synchronous subordinate)
 func (a *Agent) NewSubordinate() *Agent {
 	sub := &Agent{
 		Number:            a.Number + 1,
@@ -135,9 +147,33 @@ func (a *Agent) NewSubordinate() *Agent {
 		ProjectID:         a.ProjectID,
 		ProjectDir:        a.ProjectDir,
 		FileEventCallback: a.FileEventCallback,
+		LLMSemaphore:      a.LLMSemaphore,
 	}
 	sub.interventionCond = sync.NewCond(&sub.interventionMu)
 	return sub
+}
+
+// NewChild creates a child agent for orchestrator mode with its own AgentID.
+func (a *Agent) NewChild(childAgentID string, onLog LogCallback) *Agent {
+	child := &Agent{
+		Number:            a.Number + 1,
+		AgentID:           childAgentID,
+		Profile:           a.Profile,
+		Type:              "standard",
+		Mode:              "direct",
+		History:           []llm.ChatMessage{},
+		Tools:             a.Tools,
+		LLM:               a.LLM,
+		OnLog:             onLog,
+		Parent:            a,
+		Secrets:           a.Secrets,
+		ProjectID:         a.ProjectID,
+		ProjectDir:        a.ProjectDir,
+		FileEventCallback: a.FileEventCallback,
+		LLMSemaphore:      a.LLMSemaphore,
+	}
+	child.interventionCond = sync.NewCond(&child.interventionMu)
+	return child
 }
 
 // Intervene injects a user message into the running agent loop
@@ -271,7 +307,7 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, error) {
 		Content: userMessage,
 	})
 
-	return a.runLoop(ctx)
+	return a.dispatchLoop(ctx)
 }
 
 // Continue re-enters the agent loop without adding a new user message.
@@ -281,13 +317,33 @@ func (a *Agent) Continue(ctx context.Context) (string, error) {
 	defer a.mu.Unlock()
 
 	a.SetPaused(false)
-	return a.runLoop(ctx)
+	return a.dispatchLoop(ctx)
+}
+
+// dispatchLoop routes to the correct loop based on the agent's mode.
+func (a *Agent) dispatchLoop(ctx context.Context) (string, error) {
+	switch a.Mode {
+	case "orchestrator":
+		return a.runOrchestratorLoop(ctx)
+	case "oneshot":
+		return a.runAutomatedLoop(ctx, false)
+	case "infinite":
+		return a.runAutomatedLoop(ctx, true)
+	default: // "direct" or ""
+		return a.runLoop(ctx)
+	}
 }
 
 // runLoop is the core agent loop: think → execute → observe → repeat.
+// This is the direct-mode path, preserved unchanged from the original implementation.
 func (a *Agent) runLoop(ctx context.Context) (string, error) {
-	// Build system prompt (profile-aware)
-	systemPrompt := SystemPromptWithProfile(a.Number, a.Profile, a.ProjectDir, a.Tools.All())
+	return a.runLoopWithMaxIterations(ctx, 25)
+}
+
+// runLoopWithMaxIterations is the core agent loop with a configurable iteration cap.
+func (a *Agent) runLoopWithMaxIterations(ctx context.Context, maxIterations int) (string, error) {
+	// Build system prompt (profile and mode-aware)
+	systemPrompt := SystemPromptForMode(a.Number, a.Profile, a.ProjectDir, a.Tools.All(), a.Type, a.Mode)
 
 	// Track last response for repeat detection
 	var lastResponse string
@@ -296,7 +352,6 @@ func (a *Agent) runLoop(ctx context.Context) (string, error) {
 	const maxToolRepeats = 3
 
 	// Agent loop: think → execute → observe → repeat
-	maxIterations := 25
 	for i := 0; i < maxIterations; i++ {
 		select {
 		case <-ctx.Done():
@@ -348,6 +403,21 @@ func (a *Agent) runLoop(ctx context.Context) (string, error) {
 			})
 		}
 
+		// Acquire LLM semaphore if configured
+		if a.LLMSemaphore != nil {
+			select {
+			case a.LLMSemaphore <- struct{}{}:
+			case <-ctx.Done():
+				if a.IsCancelled() {
+					return "", ErrCancelled
+				}
+				if a.IsPaused() {
+					return "", ErrPaused
+				}
+				return "", ctx.Err()
+			}
+		}
+
 		// Call LLM with streaming via /v1/chat/completions
 		firstChunk := true
 		var streamAccum strings.Builder
@@ -364,6 +434,11 @@ func (a *Agent) runLoop(ctx context.Context) (string, error) {
 			firstChunk = false
 			return nil
 		})
+
+		// Release LLM semaphore
+		if a.LLMSemaphore != nil {
+			<-a.LLMSemaphore
+		}
 
 		if err != nil {
 			// If cancelled or paused, return quietly without logging errors
@@ -646,6 +721,273 @@ func (a *Agent) runLoop(ctx context.Context) (string, error) {
 	}
 
 	return "", fmt.Errorf("agent reached maximum iterations (%d)", maxIterations)
+}
+
+// runOrchestratorLoop decomposes a task into sub-tasks via LLM, spawns parallel children, and synthesizes results.
+func (a *Agent) runOrchestratorLoop(ctx context.Context) (string, error) {
+	if a.ChildSpawner == nil {
+		return "", fmt.Errorf("orchestrator mode requires a ChildSpawner callback")
+	}
+
+	// Build decomposition prompt
+	systemPrompt := SystemPromptForMode(a.Number, a.Profile, a.ProjectDir, a.Tools.All(), a.Type, a.Mode)
+	messages := make([]llm.ChatMessage, 0, len(a.History)+1)
+	messages = append(messages, llm.ChatMessage{Role: "system", Content: systemPrompt})
+	messages = append(messages, a.History...)
+
+	a.Log(LogEntry{
+		Type:    "info",
+		Heading: "Orchestrator",
+		Content: "Decomposing task into sub-tasks...",
+		AgentNo: a.Number,
+	})
+
+	// Acquire LLM semaphore
+	if a.LLMSemaphore != nil {
+		select {
+		case a.LLMSemaphore <- struct{}{}:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	result, err := a.LLM.ChatCompletion(ctx, messages, nil, nil)
+
+	if a.LLMSemaphore != nil {
+		<-a.LLMSemaphore
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("orchestrator decomposition failed: %w", err)
+	}
+
+	// Parse sub-tasks from LLM response (expect JSON array or numbered list)
+	subtasks := parseSubtasks(result.Content)
+	if len(subtasks) == 0 {
+		// Fallback: run as single direct task
+		a.Log(LogEntry{
+			Type:    "warning",
+			Heading: "Orchestrator",
+			Content: "Could not decompose into sub-tasks. Running as single task.",
+			AgentNo: a.Number,
+		})
+		return a.runLoopWithMaxIterations(ctx, 25)
+	}
+
+	a.Log(LogEntry{
+		Type:    "info",
+		Heading: "Orchestrator",
+		Content: fmt.Sprintf("Spawning %d child agents...", len(subtasks)),
+		AgentNo: a.Number,
+	})
+
+	// Spawn children in parallel
+	type childResult struct {
+		index int
+		name  string
+		resp  string
+		err   error
+	}
+	results := make(chan childResult, len(subtasks))
+	var wg sync.WaitGroup
+
+	for i, task := range subtasks {
+		wg.Add(1)
+		go func(idx int, taskDesc string) {
+			defer wg.Done()
+			child, childID, err := a.ChildSpawner(taskDesc)
+			if err != nil {
+				results <- childResult{index: idx, name: taskDesc, err: err}
+				return
+			}
+			resp, err := child.Run(ctx, taskDesc)
+			results <- childResult{index: idx, name: childID, resp: resp, err: err}
+		}(i, task)
+	}
+
+	// Wait for all children then close channel
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	childResults := make([]string, len(subtasks))
+	for cr := range results {
+		if cr.err != nil {
+			childResults[cr.index] = fmt.Sprintf("Task %d failed: %s", cr.index+1, cr.err.Error())
+		} else {
+			childResults[cr.index] = cr.resp
+		}
+	}
+
+	// Synthesize summary via LLM
+	var synthPrompt strings.Builder
+	synthPrompt.WriteString("You are an orchestrator agent. Your child agents have completed their tasks. Synthesize a unified summary.\n\n")
+	for i, r := range childResults {
+		synthPrompt.WriteString(fmt.Sprintf("## Child Agent %d Result\n%s\n\n", i+1, r))
+	}
+
+	if a.LLMSemaphore != nil {
+		select {
+		case a.LLMSemaphore <- struct{}{}:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	synthResult, err := a.LLM.ChatCompletion(ctx, []llm.ChatMessage{
+		{Role: "system", Content: "Synthesize the results from multiple child agents into a clear, unified response."},
+		{Role: "user", Content: synthPrompt.String()},
+	}, nil, nil)
+
+	if a.LLMSemaphore != nil {
+		<-a.LLMSemaphore
+	}
+
+	summary := ""
+	if err != nil {
+		// Fallback: concatenate results
+		summary = strings.Join(childResults, "\n\n---\n\n")
+	} else {
+		summary = synthResult.Content
+	}
+
+	a.Log(LogEntry{
+		Type:    "response",
+		Heading: "Orchestrator Summary",
+		Content: summary,
+		AgentNo: a.Number,
+	})
+
+	return summary, nil
+}
+
+// runAutomatedLoop runs the agent autonomously. For oneshot, runs once with high iteration cap.
+// For infinite, loops continuously discovering and executing improvements.
+func (a *Agent) runAutomatedLoop(ctx context.Context, infinite bool) (string, error) {
+	if !infinite {
+		// Oneshot: run with high iteration cap
+		return a.runLoopWithMaxIterations(ctx, 100)
+	}
+
+	// Infinite mode: continuous improvement loop
+	iteration := 0
+	for {
+		select {
+		case <-ctx.Done():
+			if a.IsCancelled() {
+				return "", ErrCancelled
+			}
+			if a.IsPaused() {
+				return "", ErrPaused
+			}
+			return "", ctx.Err()
+		default:
+		}
+
+		iteration++
+
+		// On subsequent iterations, inject a continuation prompt
+		if iteration > 1 {
+			a.History = append(a.History, llm.ChatMessage{
+				Role:    "user",
+				Content: "[SYSTEM] Previous task complete. Analyze the project for the next improvement opportunity (code quality, bugs, missing tests, refactoring, optimization). Continue working.",
+			})
+		}
+
+		a.Log(LogEntry{
+			Type:    "info",
+			Heading: "Infinite Mode",
+			Content: fmt.Sprintf("Starting iteration %d", iteration),
+			AgentNo: a.Number,
+		})
+
+		_, err := a.runLoopWithMaxIterations(ctx, 25)
+		if err != nil {
+			if errors.Is(err, ErrPaused) || errors.Is(err, ErrCancelled) {
+				return "", err
+			}
+			// Log error and continue after backoff
+			a.Log(LogEntry{
+				Type:    "warning",
+				Heading: "Infinite Mode Error",
+				Content: fmt.Sprintf("Iteration %d failed: %s. Retrying after pause...", iteration, err.Error()),
+				AgentNo: a.Number,
+			})
+			select {
+			case <-time.After(30 * time.Second):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			continue
+		}
+
+		// Pause between iterations
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			if a.IsCancelled() {
+				return "", ErrCancelled
+			}
+			if a.IsPaused() {
+				return "", ErrPaused
+			}
+			return "", ctx.Err()
+		}
+	}
+}
+
+// parseSubtasks extracts sub-task descriptions from LLM decomposition output.
+// Supports JSON arrays and numbered lists.
+func parseSubtasks(content string) []string {
+	// Try JSON array first
+	var tasks []struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal([]byte(content), &tasks); err == nil && len(tasks) > 0 {
+		result := make([]string, len(tasks))
+		for i, t := range tasks {
+			result[i] = t.Description
+		}
+		return result
+	}
+
+	// Try plain JSON string array
+	var strTasks []string
+	if err := json.Unmarshal([]byte(content), &strTasks); err == nil && len(strTasks) > 0 {
+		return strTasks
+	}
+
+	// Try extracting JSON from within the response
+	start := strings.Index(content, "[")
+	end := strings.LastIndex(content, "]")
+	if start >= 0 && end > start {
+		jsonStr := content[start : end+1]
+		if err := json.Unmarshal([]byte(jsonStr), &tasks); err == nil && len(tasks) > 0 {
+			result := make([]string, len(tasks))
+			for i, t := range tasks {
+				result[i] = t.Description
+			}
+			return result
+		}
+		if err := json.Unmarshal([]byte(jsonStr), &strTasks); err == nil && len(strTasks) > 0 {
+			return strTasks
+		}
+	}
+
+	// Fallback: parse numbered list (1. task, 2. task, ...)
+	var result []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) > 2 && line[0] >= '1' && line[0] <= '9' && (line[1] == '.' || line[1] == ')') {
+			task := strings.TrimSpace(line[2:])
+			if task != "" {
+				result = append(result, task)
+			}
+		}
+	}
+	return result
 }
 
 // Log sends a log entry to the registered callback or falls back to the logger.

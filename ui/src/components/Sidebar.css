@@ -173,6 +173,43 @@
   opacity: 1;
 }
 
+.agent-mode-badge {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.agent-create-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+}
+
+.agent-create-option {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.agent-create-option:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
 /* Sidebar Bottom */
 .sidebar-bottom {
   border-top: 1px solid var(--color-border-subtle);

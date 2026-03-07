@@ -1,4 +1,4 @@
-import type { Agent, Message, Process, ProcessLogLine, Project, ProjectFile, Terminal } from '../types'
+import type { Agent, AgentType, AgentMode, Message, Process, ProcessLogLine, Project, ProjectFile, Terminal } from '../types'
 
 const API_BASE = '/api'
 
@@ -90,13 +90,15 @@ export const api = {
   listAgents: (projectId?: string) =>
     request<Agent[]>(projectId ? `/agents?project_id=${projectId}` : '/agents'),
 
-  createAgent: (projectId: string, name?: string) =>
+  createAgent: (projectId: string, name?: string, type?: AgentType, mode?: AgentMode) =>
     request<Agent>('/agents', {
       method: 'POST',
-      body: JSON.stringify({ name: name || 'New Agent', project_id: projectId }),
+      body: JSON.stringify({ name: name || 'New Agent', project_id: projectId, type, mode }),
     }),
 
   getAgent: (id: string) => request<Agent>(`/agents/${id}`),
+
+  getAgentChildren: (id: string) => request<Agent[]>(`/agents/${id}/children`),
 
   deleteAgent: (id: string) =>
     request<void>(`/agents/${id}`, { method: 'DELETE' }),

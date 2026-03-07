@@ -25,10 +25,18 @@ export interface Message {
   stream?: boolean
 }
 
+export type AgentType = 'standard' | 'automated'
+export type AgentMode = 'direct' | 'orchestrator' | 'oneshot' | 'infinite'
+export type AgentStatus = 'idle' | 'running' | 'completed' | 'failed' | 'paused'
+
 export interface Agent {
   id: string
   project_id: string
   name: string
+  type: AgentType
+  mode: AgentMode
+  status: AgentStatus
+  parent_id?: string
   created_at: string
   running: boolean
 }
