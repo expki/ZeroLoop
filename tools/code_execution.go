@@ -31,6 +31,8 @@ type sessionStore struct {
 	mu       sync.Mutex
 }
 
+const maxSessions = 100
+
 var globalSessions = &sessionStore{
 	sessions: make(map[sessionKey]*sessionState),
 }
@@ -47,6 +49,17 @@ func (s *sessionStore) get(agentID string, num int, projectDir string) *sessionS
 		}
 		state = &sessionState{Cwd: cwd, Env: os.Environ()}
 		s.sessions[key] = state
+		// Evict random entries if map is too large
+		if len(s.sessions) > maxSessions {
+			for k := range s.sessions {
+				if k != key {
+					delete(s.sessions, k)
+					if len(s.sessions) <= maxSessions {
+						break
+					}
+				}
+			}
+		}
 	}
 	return state
 }

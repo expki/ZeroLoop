@@ -18,11 +18,33 @@ import (
 	"github.com/google/uuid"
 )
 
-// fileMtimes tracks last known modification times for stale detection on patches
+// fileMtimes tracks last known modification times for stale detection on patches.
+// Evicts oldest entries when exceeding maxFileMtimes to prevent unbounded growth.
 var fileMtimes = struct {
 	sync.Mutex
 	m map[string]time.Time
 }{m: make(map[string]time.Time)}
+
+const maxFileMtimes = 500
+
+func trackFileMtime(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	fileMtimes.Lock()
+	defer fileMtimes.Unlock()
+	fileMtimes.m[path] = info.ModTime()
+	// Evict random entries if map is too large (simple bounded cache)
+	if len(fileMtimes.m) > maxFileMtimes {
+		for k := range fileMtimes.m {
+			delete(fileMtimes.m, k)
+			if len(fileMtimes.m) <= maxFileMtimes {
+				break
+			}
+		}
+	}
+}
 
 type TextEditorTool struct {
 	FM *filemanager.FileManager
@@ -198,11 +220,7 @@ func (t *TextEditorTool) executeRead(path string, args map[string]any) (*agent.T
 	}
 
 	// Track mtime for stale detection
-	if info, err := os.Stat(path); err == nil {
-		fileMtimes.Lock()
-		fileMtimes.m[path] = info.ModTime()
-		fileMtimes.Unlock()
-	}
+	trackFileMtime(path)
 
 	lines := strings.Split(string(data), "\n")
 
@@ -273,11 +291,7 @@ func (t *TextEditorTool) executeWrite(path string, args map[string]any) (*agent.
 	}
 
 	// Update mtime tracking
-	if info, err := os.Stat(path); err == nil {
-		fileMtimes.Lock()
-		fileMtimes.m[path] = info.ModTime()
-		fileMtimes.Unlock()
-	}
+	trackFileMtime(path)
 
 	lines := strings.Count(content, "\n") + 1
 	return &agent.ToolResult{
@@ -349,11 +363,7 @@ func (t *TextEditorTool) executePatch(path string, args map[string]any) (*agent.
 	}
 
 	// Update mtime
-	if info, err := os.Stat(path); err == nil {
-		fileMtimes.Lock()
-		fileMtimes.m[path] = info.ModTime()
-		fileMtimes.Unlock()
-	}
+	trackFileMtime(path)
 
 	return &agent.ToolResult{
 		Message:   fmt.Sprintf("Patched %s: replaced lines %d-%d with %d new lines", path, startLine, endLine, len(newLines)),

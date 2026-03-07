@@ -193,9 +193,11 @@ func (a *Agent) checkIntervention() string {
 }
 
 const (
-	maxHistoryMessages    = 100
-	compressionThreshold  = 50 // Trigger compression when history exceeds this
-	compressionKeepRecent = 20 // Keep this many recent messages after compression
+	maxHistoryMessages     = 100
+	compressionThreshold   = 50    // Trigger compression when history exceeds this
+	compressionKeepRecent  = 20    // Keep this many recent messages after compression
+	maxToolResultSize      = 50000 // 50KB - cap tool result size in History to prevent memory bloat
+	maxConsecutiveFailures = 5     // stop infinite mode after this many consecutive failures
 )
 
 // compressHistory uses the LLM to summarize older messages into a compact form.
@@ -671,10 +673,16 @@ func (a *Agent) runLoopWithMaxIterations(ctx context.Context, maxIterations int)
 				// Mask secrets in tool result
 				maskedMessage := a.maskSecrets(result.Message)
 
+				// Truncate large tool results to cap History memory usage
+				resultContent := result.Message
+				if len(resultContent) > maxToolResultSize {
+					resultContent = resultContent[:maxToolResultSize] + fmt.Sprintf("\n\n[... output truncated (%d bytes total) ...]", len(result.Message))
+				}
+
 				// Add tool result to history
 				a.History = append(a.History, llm.ChatMessage{
 					Role:       "tool",
-					Content:    result.Message,
+					Content:    resultContent,
 					ToolCallID: tc.ID,
 				})
 
@@ -873,6 +881,7 @@ func (a *Agent) runAutomatedLoop(ctx context.Context, infinite bool) (string, er
 
 	// Infinite mode: continuous improvement loop
 	iteration := 0
+	consecutiveFailures := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -908,11 +917,21 @@ func (a *Agent) runAutomatedLoop(ctx context.Context, infinite bool) (string, er
 			if errors.Is(err, ErrPaused) || errors.Is(err, ErrCancelled) {
 				return "", err
 			}
+			consecutiveFailures++
+			if consecutiveFailures >= maxConsecutiveFailures {
+				a.Log(LogEntry{
+					Type:    "error",
+					Heading: "Infinite Mode Stopped",
+					Content: fmt.Sprintf("Stopped after %d consecutive failures. Last error: %s", consecutiveFailures, err.Error()),
+					AgentNo: a.Number,
+				})
+				return "", fmt.Errorf("infinite mode stopped after %d consecutive failures: %w", consecutiveFailures, err)
+			}
 			// Log error and continue after backoff
 			a.Log(LogEntry{
 				Type:    "warning",
 				Heading: "Infinite Mode Error",
-				Content: fmt.Sprintf("Iteration %d failed: %s. Retrying after pause...", iteration, err.Error()),
+				Content: fmt.Sprintf("Iteration %d failed: %s. Retrying... (%d/%d failures)", iteration, err.Error(), consecutiveFailures, maxConsecutiveFailures),
 				AgentNo: a.Number,
 			})
 			select {
@@ -922,6 +941,7 @@ func (a *Agent) runAutomatedLoop(ctx context.Context, infinite bool) (string, er
 			}
 			continue
 		}
+		consecutiveFailures = 0
 
 		// Pause between iterations
 		select {

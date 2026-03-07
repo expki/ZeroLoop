@@ -82,9 +82,10 @@ type Hub struct {
 	cancels        map[string]context.CancelFunc // agentID -> cancel function for current run
 	counters       map[string]*atomic.Int64      // agentID -> message number counter
 	agentToProject map[string]string             // agentID -> projectID cache
-	queues         map[string][]string           // agentID -> queued user messages
-	queueMu        sync.Mutex
-	childAgents    map[string][]string           // parentID -> []childAgentID
+	queues          map[string][]string           // agentID -> queued user messages
+	queueMu         sync.Mutex
+	childAgents     map[string][]string           // parentID -> []childAgentID
+	agentLastActive map[string]time.Time          // agentID -> last activity time
 	childCancels   map[string]context.CancelFunc // childAgentID -> cancel
 	llmSemaphore   chan struct{}                  // limits concurrent LLM calls
 	llmClient       *llm.Client
@@ -129,9 +130,10 @@ func NewHub(llmClient *llm.Client, fm *filemanager.FileManager) *Hub {
 		cancels:        make(map[string]context.CancelFunc),
 		counters:       make(map[string]*atomic.Int64),
 		agentToProject: make(map[string]string),
-		queues:         make(map[string][]string),
-		childAgents:    make(map[string][]string),
-		childCancels:   make(map[string]context.CancelFunc),
+		queues:          make(map[string][]string),
+		childAgents:     make(map[string][]string),
+		childCancels:    make(map[string]context.CancelFunc),
+		agentLastActive: make(map[string]time.Time),
 		llmSemaphore:   llmSem,
 		llmClient:       llmClient,
 		fileManager:     fm,
@@ -142,6 +144,9 @@ func NewHub(llmClient *llm.Client, fm *filemanager.FileManager) *Hub {
 
 	// Start process cleanup loop
 	h.processManager.startCleanupLoop()
+
+	// Start idle agent cleanup loop
+	h.startAgentCleanupLoop()
 
 	// Register process tools with closures that capture the hub
 	registry.Register(&tools.RunProcessTool{
@@ -666,12 +671,16 @@ func (h *Hub) createLogCallback(agentID string, counter *atomic.Int64) agent.Log
 		}
 		database.Get().Create(&msg)
 
-		// Index in search for knowledge tool
+		// Index in search for knowledge tool (truncate to cap Bleve memory)
 		if entry.Content != "" {
+			searchContent := entry.Content
+			if len(searchContent) > 10000 {
+				searchContent = searchContent[:10000]
+			}
 			_ = search.Index(search.Document{
 				ID:      msg.ID,
 				AgentID: agentID,
-				Content: entry.Content,
+				Content: searchContent,
 				Type:    string(msgType),
 				Heading: entry.Heading,
 			})
@@ -738,10 +747,14 @@ func (h *Hub) createChildLogCallback(childAgentID, parentAgentID string, counter
 		database.Get().Create(&msg)
 
 		if entry.Content != "" {
+			searchContent := entry.Content
+			if len(searchContent) > 10000 {
+				searchContent = searchContent[:10000]
+			}
 			_ = search.Index(search.Document{
 				ID:      msg.ID,
 				AgentID: childAgentID,
-				Content: entry.Content,
+				Content: searchContent,
 				Type:    string(msgType),
 				Heading: entry.Heading,
 			})
@@ -883,6 +896,7 @@ func (h *Hub) cancelChildAgent(childID string) {
 	}
 	delete(h.agents, childID)
 	delete(h.counters, childID)
+	delete(h.agentLastActive, childID)
 	h.agentMu.Unlock()
 }
 
@@ -1029,9 +1043,19 @@ func (h *Hub) handleSendMessage(agentID, content string) {
 	_, err := agentInstance.Run(ctx, content)
 	cancel()
 
-	// Clean up cancel from map
+	// Clean up cancel from map and update last active time
 	h.agentMu.Lock()
 	delete(h.cancels, agentID)
+	h.agentLastActive[agentID] = time.Now()
+	// Clean up orchestrator child agents from in-memory maps
+	if childIDs, ok := h.childAgents[agentID]; ok {
+		for _, childID := range childIDs {
+			delete(h.agents, childID)
+			delete(h.counters, childID)
+			delete(h.agentLastActive, childID)
+		}
+		delete(h.childAgents, agentID)
+	}
 	h.agentMu.Unlock()
 
 	// If paused, handlePause already updated the state — exit quietly
@@ -1057,8 +1081,8 @@ func (h *Hub) handleSendMessage(agentID, content string) {
 		queueData, _ := json.Marshal(map[string]any{"id": agentID, "queue_size": queueLen})
 		h.broadcast(agentID, WSMessage{Type: "chat_update", Payload: queueData})
 
-		// Process next queued message (reuse goroutine)
-		h.handleSendMessage(agentID, nextMsg)
+		// Process next queued message in new goroutine to prevent stack growth
+		go h.handleSendMessage(agentID, nextMsg)
 		return
 	}
 
@@ -1342,6 +1366,8 @@ func (h *Hub) cleanupAgent(agentID string) {
 	}
 	delete(h.agents, agentID)
 	delete(h.counters, agentID)
+	delete(h.agentToProject, agentID)
+	delete(h.agentLastActive, agentID)
 	h.agentMu.Unlock()
 
 	// Cancel child agents outside the parent lock
@@ -1355,4 +1381,40 @@ func (h *Hub) cleanupAgent(agentID string) {
 		logger.Log.Debugw("slot erase skipped (best-effort)", "agent_id", agentID, "error", err)
 	}
 	eraseCancel()
+}
+
+// startAgentCleanupLoop periodically removes idle agent instances from memory.
+func (h *Hub) startAgentCleanupLoop() {
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			h.cleanupIdleAgents(30 * time.Minute)
+		}
+	}()
+}
+
+// cleanupIdleAgents removes agent instances that haven't been active for maxIdle duration.
+// This frees History memory for agents that are no longer in use.
+func (h *Hub) cleanupIdleAgents(maxIdle time.Duration) {
+	h.agentMu.Lock()
+	defer h.agentMu.Unlock()
+	now := time.Now()
+	for agentID, lastActive := range h.agentLastActive {
+		// Skip agents that are currently running
+		if _, running := h.cancels[agentID]; running {
+			continue
+		}
+		// Skip paused agents
+		if a, ok := h.agents[agentID]; ok && a.IsPaused() {
+			continue
+		}
+		if now.Sub(lastActive) > maxIdle {
+			delete(h.agents, agentID)
+			delete(h.counters, agentID)
+			delete(h.agentToProject, agentID)
+			delete(h.agentLastActive, agentID)
+			logger.Log.Debugw("cleaned up idle agent", "agent_id", agentID, "idle_for", now.Sub(lastActive))
+		}
+	}
 }
